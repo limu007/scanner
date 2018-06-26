@@ -1050,3 +1050,5 @@ if __name__ == '__main__':
     aw=MainWindow()
     #if "--init" in sys.argv: rc.auto_init=True
     aw.configure_traits(view=tabbedview)
+    message(" press Setup first ", title = 'User request')
+        
