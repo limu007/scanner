@@ -495,7 +495,7 @@ class Spectrac(HasTraits):
 
     acquire = Event
     def _chanmatch_fired(self):
-        if not hasattr(self.instr,'samp'): return
+        if not hasattr(self.instr,'samp') or self.instr.samp==None: return
         corrs=self.instr.samp.mismat(self.instr.transtable)
         print(corrs)
         for i,b in enumerate(self.instr.samp.bands):

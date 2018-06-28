@@ -179,4 +179,5 @@ interact=0 # 1=alerts as extra boxes
 line_color='r'
 line_width=0.5
 
+graph_max=5.
 vert_exten=0.2
