@@ -74,12 +74,14 @@ class Experiment(HasTraits):
     ready = Bool(False)
     paren = None
     errb = Bool(False,label="error",desc="show error band")
+    recalper = Int(0,label="recalib. period",desc="regular calibration during scanning")
 
     menubar = MenuBar(Menu(Action(name='test Action', action='_run_action'), name="Menu"))
 
     view = View(Item('expo',width=5), Item('aver',resizable=True,width=5),
                 HGroup(Item('shut'),Item('median',width=5),Item('combine'), Item('smooth',enabled_when="combine==False")),
-                HGroup(Item('refer',show_label=False, enabled_when="ready"),Item('darken',show_label=False, enabled_when="ready")),
+                HGroup(Item('refer',show_label=False, enabled_when="ready"),Item('darken',show_label=False, enabled_when="ready"),
+                Item('recalper',enabled_when="ready"),),
                 HGroup(Item('sname'),Item('saveme',show_label=False, enabled_when="sname!=''"),Item('record')),
                 HGroup(Item('saveall',show_label=False, enabled_when="sname!=''"),Item('refermat',label="Ref. material")),Item('errb'),#editor=CheckListEditor(values=reflist)
                 menubar=menubar,width=10)
@@ -163,16 +165,16 @@ class Experiment(HasTraits):
         savetxt(self.sname,array(speclst).T,fmt="%8.5f")
         print(self.sname+" saved /"+str(len(speclst)))
 
-    def _darken_fired(self):
-        if self.paren.acquisition_thread and self.paren.acquisition_thread.isAlive():
+    def _darken_fired(self,interrupt=True):
+        if self.paren.acquisition_thread and interrupt and self.paren.acquisition_thread.isAlive():
             self.paren.acquisition_thread.wants_abort = True
         message(" block the light beam, please ", title = 'User request')
         self.instr.dark=self.instr.result(sub_dark=False,div_flat=False,smooth=self.smooth,maxit=-1) #no correction/calibration
         self.paren.status_string="dark curr. saved"
         #if self.config!=None: self.config.adjust_image()
 
-    def _refer_fired(self):
-        if self.paren.acquisition_thread and self.paren.acquisition_thread.isAlive():
+    def _refer_fired(self,interrupt=True):
+        if self.paren.acquisition_thread and interrupt and self.paren.acquisition_thread.isAlive():
             self.paren.acquisition_thread.wants_abort = True
         self.paren.status_string="measuring reference sample"
         from numpy import any,iterable
@@ -251,6 +253,7 @@ class Scan(HasTraits):
     actpos = List(Float,[0,0])
     count = [0,0]
     exelist = {}
+    since_calib=0
 
     def setup(self):
         if self.instr==None:
@@ -294,6 +297,7 @@ class Scan(HasTraits):
         self.instr.goto(rc.refer_pos[0],rc.refer_pos[1])
 
     def _shome_fired(self):
+        # reset axis
         if self.instr: self.instr.ahome()
         for i in range(2):
             self.actpos[i]=rc.xy_cent[i]
@@ -323,9 +327,10 @@ class Scan(HasTraits):
 
     def _setcenter_fired(self):
         print("current position as wafer center")
+        self._gpos_fired()
         self.centpos=self.actpos
         self.centstr=str(list(self.centpos))
-
+        print("center now at")
     def _actpos_changed(self):
         self.cpos=str(list(self.actpos))
 
@@ -381,8 +386,16 @@ class Scan(HasTraits):
         else:
             print("riding %i,%i"%(point[0],point[1]))
             sleep(10-self.speed)
+        if self.exelist['plan'].experiment.recalper>0 and self.since_calib>self.exelist['plan'].experiment.recalper:
+            # recalibration planned
+            if rc.refer_pos[0]*rc.refer_pos[1]>0: #have calibration sample
+                self._srefer_fired() # goto reference sample
+                sleep(5-self.speed)
+                self.exelist['plan'].experiment._refer_fired(interrupt=False) #measure reference
+                self.since_calib=0        
         self.actpos=list(point)
         self.npoints-=1
+        self.since_calib+=1
         #self.cpos=str(list(self.actpos))
         for k in self.exelist.keys():
             self.exelist[k].acquire=True
@@ -461,7 +474,7 @@ class Spectrac(HasTraits):
     #Item('elow'), Item('ehigh'),
     setmeup = Button("Setup")
     equalize = Button("Equal")
-    calib = Button("Calibrate Si")
+    calib = Button("Calibrate SiO2")
     chanshow = Button("Show channels")
     resol = Float(rc.meas_comb_resol, label="spectral resolution in eV")
     cooler=Bool(False)
@@ -481,9 +494,9 @@ class Spectrac(HasTraits):
                 HSplit(Item('darkcorr',width=5),Item('nonlincorr',width=5),),
                 HSplit(Item('norm',style='simple',label="channel equalizer", enabled_when='instr!=None'),Item('equalize',width=5,show_label=False),
                     Item('chanshow',width=5,show_label=False),Item('chanmatch')),#,enabled_when="instr.flat!=None")),
-                Item('port'),Item('calib',width=5,show_label=False, enabled_when='instr.samp!=None'),
+                Item('calib',width=5,show_label=False, enabled_when='instr.samp!=None'),
                 HSplit(Item('refer_x'),Item('refer_y'),),
-                Item('setmeup',show_label=False),
+                HSplit(Item('port'),Item('setmeup',show_label=False)),
                 springy=True),resizable=True)#, enabled_when="config!=None")
     from numpy import array
     #norm = array([1,1.,1.])
@@ -579,6 +592,8 @@ class Spectrac(HasTraits):
         print(self.exper.refermat)
         assert self.instr.samp!=None
         self.instr.samp.calib()
+        thk=self.instr.samp.bands[0].guess()
+        print("thickness:"+str(thk))
         print([b.samp.norm(b.ix).mean() for b in self.instr.samp.bands])
 
     def close(self):

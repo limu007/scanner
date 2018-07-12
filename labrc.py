@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 debug=2
 
-smoothing=0
+smoothing=10
 mean=20
 intime=25
 use_dyndark=0
@@ -137,7 +137,7 @@ init_ox_set=False
 underate=5.
 graph_min=0.1
 
-refer_pos=[65,105]
+refer_pos=[5,70]
 xy_size=[160,160]
 
 scan_realtime=False # multitasking - analysis in real time
@@ -177,6 +177,7 @@ set_maximized=False #full screen from start
 interact=0 # 1=alerts as extra boxes
 
 line_color='r'
+all_color=list('bgcmkr')+['maroon','darkslategray','lawngreen']
 line_width=0.5
 
 graph_max=5.

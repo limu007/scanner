@@ -1304,7 +1304,7 @@ class webocean(specscope):
             
     def end(self):
         if self.scomm!=None:
-            del self.spout 
+            if hasattr(self,"spout"): del self.spout 
             self.scomm.terminate()
             #self.scomm.send_signal(15)
 

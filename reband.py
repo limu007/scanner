@@ -237,7 +237,8 @@ class Sample():
         if laystruct!=None: self.lay=laystruct
 
     def calib(self):
-        import spectra,profit,pickle,os
+        from scanner import spectra,profit
+        import pickle,os
         #epssi=spectra.dbload("cSi_asp")
         #pickle.dump(epssi,open(indir+"si_eps_full.mat","w"))
 
@@ -249,7 +250,11 @@ class Sample():
                 epssi=pickle.load(open(indir+"si_eps_fulld.mat","rb"))
             diel['ksi']=ip.interp1d(epssi[0],epssi[1])
         if not 'ksio2' in diel:
-            tsio2=np.loadtxt(indir+"sio2_palik_g.mat",unpack=True,skiprows=3)
+            if not os.path.exists(indir+"sio2_palik_g.mat"):
+                x=np.r_[0.5:4.5:0.01]#epssi[0]
+                tsio2=[x,np.polyval(spectra.cau_sio2,x)]
+            else:
+                tsio2=np.loadtxt(indir+"sio2_palik_g.mat",unpack=True,skiprows=3)
             diel['ksio2']=ip.interp1d(tsio2[0],tsio2[1]**2)
         if refthk<1.: self.norm= lambda px: profit.reflect(diel['ksi'](px))
         else: self.norm= lambda px: profit.plate(px,[diel['ksio2'](px),diel['ksi'](px)],[refthk])
@@ -299,6 +304,30 @@ class Sample():
             if ret==1: rep.append((laps[1]/laps[0]))
             else: rep.append(uarray(laps[1]/laps[0]).mean())
         return rep
+
+    def save(self,fname,liner=False):
+        if liner:
+            of=open(fname,"w")
+            for i,b in enumerate(self.bands):
+                of.write("# band %i"%i)
+                for j in range(len(b.ix)):
+                    of.write("%.3f  %.3f \n"%(b.ix[i],b.iy[i]))
+            of.close()
+        else:
+            blen=max([len(b.ix) for b in self.bands])
+            #self.data=np.concatenate([[self.bands.ix[i],self.bands.iy[i]] for i in range(len(self.chanene))]
+            np.savetxt(self.data)
+
+    def load(self,fname):
+        of=open(fname)
+        for l in of:
+            if l[0]=="#" and l.find('band')>0:
+                bid=int(l[l.rfind(' '):])
+                while bid>=len(self.bands):
+                    self.bands.append(Band())
+            else:
+                dat=[float(q) for q in l.split()]
+        of.close()
 
     def plot(self,amodel=False,lims=[0,1],unit='eV'):
         for b in self.bands:
