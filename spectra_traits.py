@@ -265,7 +265,7 @@ class Scan(HasTraits):
 
     def _design_fired(self):
         from numpy import mgrid,newaxis,array
-        self.centpos=rc.xy_cent#self.setup()
+        #self.centpos=rc.xy_cent#self.setup()
         self.centstr=str(list(self.centpos))
         self.program=mgrid[:self.Xpts,:self.Ypts]*(array([self.Xstep,self.Ystep]).reshape(2,1,1))
         if self.zigzag:
@@ -330,7 +330,8 @@ class Scan(HasTraits):
         self._gpos_fired()
         self.centpos=self.actpos
         self.centstr=str(list(self.centpos))
-        print("center now at")
+        print("center now at "+self.centstr)
+
     def _actpos_changed(self):
         self.cpos=str(list(self.actpos))
 
@@ -400,10 +401,10 @@ class Scan(HasTraits):
         for k in self.exelist.keys():
             self.exelist[k].acquire=True
 
-    def run_scan(self):
-        #obsolete
-        #now part of acquisition thread
-        self.process=self.instr.scan_save(self.Xstep,self.Ystep,self.Xpts,self.Ypts,self.radius)
+#   def run_scan(self):
+#        #obsolete
+#        #now part of acquisition thread
+#        self.process=self.instr.scan_save(self.Xstep,self.Ystep,self.Xpts,self.Ypts,self.radius)
 #----------------------------------------
 
 def analyse(spect):
