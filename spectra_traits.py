@@ -139,6 +139,7 @@ class Experiment(HasTraits):
             data=self.instr.result(maxit=-2)
             olist=[]
             for i in range(len(data)):
+                if hasattr(self,'intfact') and self.intfact[i]==0: continue
                 olist+=[self.instr.chanene[i],data[i]]
             odata=array(olist)
         elif len(self.stack)>1:
@@ -191,14 +192,17 @@ class Experiment(HasTraits):
         if hasattr(self.instr,"setflat"):
             self.instr.setflat(perc=rc.flat_above_quantile,fresh=False)
             self.display("reference table calculated")
-            self.display("channels :"+' '.join(["[%i]"%sum(a) for a in self.instr.ysel]))
-            self.display("weights :"+' '.join(["[%.2f / %i]"%(a.sum(),sum(a.sum(0)>0)) for a in self.instr.transtable]))
+            if iterable(self.instr.ysel):
+                self.display("channels :"+' '.join(["[%i]"%(sum(a) if iterable(a) else 0) for a in self.instr.ysel]))
+                self.display("weights :"+' '.join(["[%.2f / %i]"%(a.sum(),sum(a.sum(0)>0)) for a in self.instr.transtable if iterable(a)]))
 
         else: self.display("reference stored")
         self.paren.status_string="calibration finished"
         if not self.combine:
             for i in range(len(self.instr.flat)):
-                self.instr.ysel[i]*=self.instr.flat[i]>=rc.underate
+                if iterable(self.instr.ysel) and len(self.instr.ysel)>=i: 
+                    self.instr.ysel[i]*=self.instr.flat[i]>=rc.underate
+                self.instr.flat[i][self.instr.flat[i]<1]=1 #correct for zeros
         if self.config!=None: self.config.adjust_image()
 
 intwid=50
@@ -243,7 +247,7 @@ class Scan(HasTraits):
                 HGroup(Item('centerstart'),Item('retlast'),Item('zigzag'),Item('design',show_label=False),Item('dump',show_label=False),Item('pclear',show_label=False)),
                 HGroup(Item('up',show_label=False),Item('down',show_label=False),
                     Item('left',show_label=False),Item('right',show_label=False),Item('ptskip',show_label=False),Item('gpos',show_label=False),enabled_when="ready"),
-                HGroup(Item('npoints',style='readonly'),Item('cpos',style='readonly'),Item('shome',show_label=False),Item('srefer',show_label=False),Item('gocenter',show_label=False),Item('setcenter',show_label=False),
+                HGroup(Item('npoints',style='readonly'),Item('cpos'),Item('shome',show_label=False),Item('srefer',show_label=False),Item('gocenter',show_label=False),Item('setcenter',show_label=False),
                     Item('cmeasure',show_label=False),enabled_when="ready"),
                 Item('speed',show_label=True),
                 label="Scanner", layout='split',
@@ -287,14 +291,20 @@ class Scan(HasTraits):
         else:
             self.program=list(self.program.reshape(2,self.Xpts*self.Ypts).T)
         if self.retlast:
-            self.program.append(self.program[0])
+            self.program.append([float(a) for a in self.actpos])
         self.npoints=len(self.program)
         if 'plan' in self.exelist: #vykreslit
             self.exelist['plan'].design_show(self.program)
             self.exelist['plan'].experiment.clear_stack()
+        self.since_calib=0
 
     def _srefer_fired(self):
         self.instr.goto(rc.refer_pos[0],rc.refer_pos[1])
+
+    def _cpos_changed(self):
+        gpos=self.cpos[1:-1].strip().split(',')
+        if len(gpos)==2:
+            self.instr.goto(int(float(gpos[0])),int(float(gpos[1])))
 
     def _shome_fired(self):
         # reset axis
@@ -387,14 +397,14 @@ class Scan(HasTraits):
         else:
             print("riding %i,%i"%(point[0],point[1]))
             sleep(10-self.speed)
-        if self.exelist['plan'].experiment.recalper>0 and self.since_calib>self.exelist['plan'].experiment.recalper:
+        if self.exelist['plan'].experiment.recalper>0 and self.since_calib>=self.exelist['plan'].experiment.recalper:
             # recalibration planned
             if rc.refer_pos[0]*rc.refer_pos[1]>0: #have calibration sample
                 self._srefer_fired() # goto reference sample
                 sleep(5-self.speed)
                 self.exelist['plan'].experiment._refer_fired(interrupt=False) #measure reference
                 self.since_calib=0        
-        self.actpos=list(point)
+        self.actpos=[float(p) for p in point]
         self.npoints-=1
         self.since_calib+=1
         #self.cpos=str(list(self.actpos))
@@ -435,7 +445,7 @@ class AcquisitionThread(Thread):
         """ Runs the acquisition loop. """
         self.display('Spectrac started')
         self.n_img = 0
-        from numpy import iterable
+        from numpy import array,iterable
         while not self.wants_abort:
             self.n_img += 1
             if hasattr(self,"prepare"): self.prepare()
@@ -452,6 +462,9 @@ class AcquisitionThread(Thread):
                 else:
                     print("sample not created")
             self.display('%d spectra captured' % self.n_img)
+            if self.experiment.combine==False:
+                if sum(array(self.experiment.instr.intfact)>0)==1: #just one channel
+                    spect=[spect[i] for i in range(len(spect)) if self.experiment.instr.intfact[i]>0]
             if hasattr(self,"stack"):
                 sname=self.experiment.stack_name()
                 if not sname in self.stack:
@@ -462,6 +475,15 @@ class AcquisitionThread(Thread):
         self.display('Spectrac stopped')
 
 #--------------------------------------------------------------------
+class ChanHandler(Handler):
+    channels=List(Str)
+    def object_instr_changed(self, info):
+        self.channels=['all channels']+info.object.chanlist
+        info.object.singlechan=self.channels[0]
+    def object_ready_changed(self, info):
+        self.channels=['all channels']+info.object.chanlist
+        info.object.singlechan=self.channels[0]
+
 class Spectrac(HasTraits):
     """ Spectrac setup and acquisition.
     """
@@ -476,6 +498,9 @@ class Spectrac(HasTraits):
     setmeup = Button("Setup")
     equalize = Button("Equal")
     calib = Button("Calibrate SiO2")
+    #singlechan= List(Str,['all channels','single channel'],label='select channels')
+    singlechan=Str#,Enum(['all channels','single channel'])
+    chanlist=['single channel']
     chanshow = Button("Show channels")
     resol = Float(rc.meas_comb_resol, label="spectral resolution in eV")
     cooler=Bool(False)
@@ -483,7 +508,7 @@ class Spectrac(HasTraits):
     norm = Tuple(Float,Float,Float)#List(Float, [1.,1,1])
     darkcorr = Bool(True, label="Dynamic dark")
     nonlincorr = Bool(True, label="Nonlin. correction")
-
+    ready=Bool(False)
     chanmatch = Button("Match")
     refer_x = Int(rc.refer_pos[0])
     refer_y = Int(rc.refer_pos[1])
@@ -493,12 +518,18 @@ class Spectrac(HasTraits):
                 Item('simulate'),
                 HSplit(Item('resol',width=5),Item('cooltemp',width=5, enabled_when='cooler'),),
                 HSplit(Item('darkcorr',width=5),Item('nonlincorr',width=5),),
-                HSplit(Item('norm',style='simple',label="channel equalizer", enabled_when='instr!=None'),Item('equalize',width=5,show_label=False),
+                HSplit(Item('norm',style='simple',label="channel equalizer", enabled_when='instr!=None'),
+                    #Item('singlechan',show_label=False, editor=ListEditor(style='readonly'),style='simple', enabled_when='instr!=None'),
+                    Item('singlechan',show_label=False,editor=EnumEditor(name='handler.channels')),
+                    Item('equalize',width=5,show_label=False),
                     Item('chanshow',width=5,show_label=False),Item('chanmatch')),#,enabled_when="instr.flat!=None")),
                 Item('calib',width=5,show_label=False, enabled_when='instr.samp!=None'),
                 HSplit(Item('refer_x'),Item('refer_y'),),
                 HSplit(Item('port'),Item('setmeup',show_label=False)),
-                springy=True),resizable=True)#, enabled_when="config!=None")
+                springy=True),
+                resizable=True,
+                handler=ChanHandler
+            )#, enabled_when="config!=None")
     from numpy import array
     #norm = array([1,1.,1.])
     cooler=False
@@ -541,6 +572,10 @@ class Spectrac(HasTraits):
         self.exper.display("setup ok [%i pixels] ..."%len(self.pixels))
         self.norm=(1,1,1)
         self.paren.status_string="now calibrate [Experiment/Reference+Dark]"
+        self.chanlist=[('%.2f-%.2f eV'%(c.min(),c.max())) for c in self.instr.chanene]
+        self.ready=True
+        #for c in self.chanlist:
+        #    self.singlechan.append(c)
 
     def _setmeup_fired(self):
         self.setup()
@@ -559,7 +594,17 @@ class Spectrac(HasTraits):
         self.paren.figure.canvas.draw()
 
     def _norm_changed(self):
-        self.instr.intfact=list(self.norm)
+        if self.instr!=None: self.instr.intfact=list(self.norm)
+ 
+    def _singlechan_changed(self):
+        from numpy import ones
+        if self.singlechan=='all channels': 
+            self.norm=tuple(list(ones(len(self.norm))))
+        else:
+            isel=self.chanlist.index(self.singlechan)
+            if isel<0: isel=len(self.norm)-1
+            self.norm=tuple([1. if i==isel else 0 for i in range(len(self.norm))])
+        #self._norm_changed()
 
     def _equalize_fired(self):
         from numpy import iterable,array,percentile
@@ -910,10 +955,12 @@ class ControlPanel(HasTraits):
             if self.experiment.combine:
                 self.spect_last=self.figure.axes[0].plot(self.spectrac.pixels,spect,rc.line_color,lw=rc.line_width)[0]
             else:
+                from numpy import array,arange
                 pin=self.spectrac.instr
                 self.spect_last=[]
+                ipck=arange(len(pin.chanene))[array(pin.intfact)>0]
                 for i in range(len(spect)):
-                    dx,dy=pin.chanene[i],spect[i]
+                    dx,dy=pin.chanene[ipck[i]],spect[i]
                     if pin.ysel!=None:
                         dx,dy=dx[pin.ysel[i]],dy[pin.ysel[i]]
                     self.spect_last.append(self.figure.axes[0].plot(dx,dy,lw=rc.line_width,color=self.grcolors[i])[0])
@@ -922,8 +969,10 @@ class ControlPanel(HasTraits):
             if self.experiment.combine:
                 self.spect_last.set_ydata(spect)
             else:
+                from numpy import iterable
                 pin=self.spectrac.instr
                 for i in range(len(spect)):
+                    #if not iterable(pin.ysel[i]): continue  
                     if self.spectrac.norm[i]>0: #instr.intfact
                         self.spect_last[i].set_ydata(spect[i][pin.ysel[i]])
         self.figure.canvas.draw()

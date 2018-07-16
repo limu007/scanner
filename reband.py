@@ -96,7 +96,7 @@ class Band():
 
     def guess(self,dlist=None,rep=1):
         #dlist in nanometers
-        import profit
+        from scanner import profit
         epsi=[diel['ksio2'](self.ix),diel['ksi'](self.ix)]
         if not(np.iterable(dlist)): dlist=np.arange(20,300,5)
         nor=lambda d:((self.absol())[self.sel]/self.model([d],renow=True)[self.sel]).std()
@@ -168,7 +168,7 @@ class Band():
         self.mid=uarray(zlst)
 
     def model(self,pars,renow=False):
-        import profit
+        from scanner import profit
         if len(pars)<3:
             if renow: self.renorm(minmodval,pars[0])
             if hasattr(self,"rat"): p=[pars[0],self.rat[0],self.rat[1]]

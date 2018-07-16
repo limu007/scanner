@@ -1367,18 +1367,20 @@ class uniocean(webocean):
             from scanner import reband
         return reband.Sample(None,data=concatenate([[self.chanene[i],data[i]] for i in range(len(self.chanene))]))
     
-    def setflat(self,minval=3,perc=3,fresh=True):
+    def setflat(self,minval=3,perc=3,fresh=True,smooth=30):
         from numpy import iterable,zeros_like
         if fresh: data=self.measure().copy()
         else: data=self.chanval.copy()
-        if iterable(self.dark): data-=self.dark
+        if iterable(self.dark): 
+            for i in range(len(self.dark)):
+                if self.intfact[i]<=0: continue
+                data[i]-=self.dark[i]
         if (data<minval).sum()/data.size>0.5:
             print("intensity too low")
             return
         data[data<minval]=minval
         self.flat=data
         asel=zeros_like(data[0],dtype=bool)
-        smooth=30
         asel[smooth:-smooth]=True
         #self.transtable,self.ysel=gettrans(self.pixtable,self.chanene,self.flat,smot=0.02,skiplowest=perc,osel=[asel]*3,disfun=lambda x:x**2,weifun=lambda x:x**3)
         self.transtable,self.ysel=gettrans(self.pixtable,self.chanene,self.flat,skiplowest=perc,
