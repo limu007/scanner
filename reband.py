@@ -198,6 +198,7 @@ class Band():
         self.qfit=resid(zpar)
         if save!=None:
             self.samp.thick[save]=zpar[0]
+            self.samp.chi2[save]=self.qfit
             self.rat=list(zpar[1:])
         return zpar
 
@@ -219,6 +220,7 @@ class Sample():
     def __init__(self,fname,laystruct="SiO2/Si",delim=None,maxband=0,data=None):
         self.bands=[]
         self.thick={}
+        self.chi2={}
         self.fname=fname
         if fname==None:
             assert np.iterable(data)
@@ -251,7 +253,7 @@ class Sample():
             diel['ksi']=ip.interp1d(epssi[0],epssi[1])
         if not 'ksio2' in diel:
             if not os.path.exists(indir+"sio2_palik_g.mat"):
-                x=np.r_[0.5:4.5:0.01]#epssi[0]
+                x=np.r_[0.5:6.5:0.01]#epssi[0]
                 tsio2=[x,np.polyval(spectra.cau_sio2,x)]
             else:
                 tsio2=np.loadtxt(indir+"sio2_palik_g.mat",unpack=True,skiprows=3)

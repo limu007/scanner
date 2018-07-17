@@ -304,7 +304,11 @@ class Scan(HasTraits):
     def _cpos_changed(self):
         gpos=self.cpos[1:-1].strip().split(',')
         if len(gpos)==2:
-            self.instr.goto(int(float(gpos[0])),int(float(gpos[1])))
+            try:
+                pos=[int(float(g)) for g in gpos]
+                self.instr.goto(pos[0],pos[1])
+            except:
+                pass
 
     def _shome_fired(self):
         # reset axis
@@ -343,7 +347,7 @@ class Scan(HasTraits):
         print("center now at "+self.centstr)
 
     def _actpos_changed(self):
-        self.cpos=str(list(self.actpos))
+        self.cpos=str([int(a) for a in list(self.actpos)])
 
     def _gocenter_fired(self):
         self.instr.goto(self.centpos[0],self.centpos[1])
@@ -453,6 +457,7 @@ class AcquisitionThread(Thread):
             if not iterable(spect):
                 print("acquisition failed")
                 break #returned none
+            #spect=array(spect)
             if self.experiment.refermat!='unity':
                 instr=self.experiment.instr
                 if instr.samp!=None:
@@ -464,7 +469,8 @@ class AcquisitionThread(Thread):
             self.display('%d spectra captured' % self.n_img)
             if self.experiment.combine==False:
                 if sum(array(self.experiment.instr.intfact)>0)==1: #just one channel
-                    spect=[spect[i] for i in range(len(spect)) if self.experiment.instr.intfact[i]>0]
+                    isel=[i for i in range(len(spect)) if self.experiment.instr.intfact[i]>0][0]
+                    spect=spect[isel] 
             if hasattr(self,"stack"):
                 sname=self.experiment.stack_name()
                 if not sname in self.stack:
@@ -495,7 +501,7 @@ class Spectrac(HasTraits):
     simulate = Bool(False, label="Emulate")
     port = Int(rc.web_port, label="connect. port no.")
     #Item('elow'), Item('ehigh'),
-    setmeup = Button("Setup")
+    setmeup = Button("Initialize")
     equalize = Button("Equal")
     calib = Button("Calibrate SiO2")
     #singlechan= List(Str,['all channels','single channel'],label='select channels')
@@ -604,6 +610,9 @@ class Spectrac(HasTraits):
             isel=self.chanlist.index(self.singlechan)
             if isel<0: isel=len(self.norm)-1
             self.norm=tuple([1. if i==isel else 0 for i in range(len(self.norm))])
+            if self.instr!=None: 
+                self.instr.pixtable=self.instr.chanene[isel]
+                self.pixels=self.instr.pixtable.copy()
         #self._norm_changed()
 
     def _equalize_fired(self):
@@ -952,7 +961,7 @@ class ControlPanel(HasTraits):
         #self.figure.axes[0].images=[]
         if self.spect_last==None:
             if rc.debug>0: print("(re)new graphs")
-            if self.experiment.combine:
+            if type(spect)!=list and len(spect.shape)==1:#self.experiment.combine:
                 self.spect_last=self.figure.axes[0].plot(self.spectrac.pixels,spect,rc.line_color,lw=rc.line_width)[0]
             else:
                 from numpy import array,arange
@@ -966,15 +975,19 @@ class ControlPanel(HasTraits):
                     self.spect_last.append(self.figure.axes[0].plot(dx,dy,lw=rc.line_width,color=self.grcolors[i])[0])
             self.figure.axes[0].grid(1)
         else:
-            if self.experiment.combine:
+            if type(spect)!=list and len(spect.shape)==1:#self.experiment.combine:
                 self.spect_last.set_ydata(spect)
             else:
                 from numpy import iterable
+                if rc.debug>1: print("updating %i graphs"%len(spect))
                 pin=self.spectrac.instr
                 for i in range(len(spect)):
                     #if not iterable(pin.ysel[i]): continue  
                     if self.spectrac.norm[i]>0: #instr.intfact
-                        self.spect_last[i].set_ydata(spect[i][pin.ysel[i]])
+                        if pin.ysel!=None:
+                            self.spect_last[i].set_ydata(spect[i][pin.ysel[i]])
+                        else:
+                            self.spect_last[i].set_ydata(spect[i])
         self.figure.canvas.draw()
         #self.profile.canvas.draw()
 

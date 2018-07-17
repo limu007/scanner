@@ -9,6 +9,7 @@ fitting of reflectivity on multilayers / gradual / mixing (EMA) materials:
 spectral 
 plotting of complex functions (1 or 2 panes)
 '''
+ev2um=0.806554243769
 
 
 from math import pi
@@ -248,7 +249,7 @@ def plate(freq,epsil,width,ang=0,polar='s',n0=1.,rep=1,aver=False,unit='eV'):
     sh=[] #phase shift in each layer
     if len(width)==len(epsil):nend=n0 #exit layer same as input
     else:nend=0
-    from spectra import c0,ev2um
+    #from spectra import c0,ev2um
     cang,canh=None,None # cosine of angles above/below the interface
     psi=[]
     i=0
@@ -344,7 +345,7 @@ def matter_plate(freq,epsil,width,rep=0,meth=0,polar='s',ang=0,n0=1):
         without angular dependance yet
     '''
     from numpy import sqrt,cos,sin,exp,conj,zeros,ones
-    from spectra import ev2um
+    #from spectra import ev2um
     global delt,pl
     matt=None;#matrix([[1.,0],[0.,1.]],'c16')
     cang=1
