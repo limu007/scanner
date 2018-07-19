@@ -6,7 +6,7 @@ refthk=0.5#23.7 #oxide thickness on reference sample in [nm]
 rescale=1
 #indir="C:/Users/Admin/Documents/Lab/MOCVD/lpcvd-calib/"
 indir="C:/Users/Optik/Documents/Data/Calib/"
-
+sinname="sin_nk_test.mat"#"sinx_cl2.mat"
 def gettrans(enx,dpos,ref,smot=0.03,skiplowest=0,rep=1,osel=None,disfun=None,weifun=None):
     ysel=None
     from numpy import array,percentile,iterable,newaxis
@@ -59,11 +59,14 @@ class Band():
 
     def __init__(self,samp,loc=0,bord=10):
         self.samp=samp
-        self.ix,self.iy=samp.data[loc],samp.data[loc+1]
+        if loc<0:
+            self.ix,self.iy=samp.data[0],samp.data[-loc]
+        else:
+            self.ix,self.iy=samp.data[loc],samp.data[loc+1]
         #self.sel=slice(10,-10)
         self.sel=self.ix>0
-        self.sel[:10]=False
-        self.sel[-10:]=False
+        self.sel[:bord]=False
+        self.sel[-bord:]=False
         self.correct=""
         self.scale=1
 
@@ -107,14 +110,15 @@ class Band():
     def renorm(self,minval=0.05,thick=None):
         if thick==None:
             thick=np.median(self.samp.thick.values())
-        osel=self.sel*(self.model([thick,1,0])>minval)
+        modval=self.model([thick,1,0])
+        osel=self.sel*(modval>minval)
         yval=self.absol()
         osel*=yval>minval
         if sum(osel)<3:
             print("too few points")
             osel=self.sel
 
-        res=np.polyfit(self.model([thick,1,0])[osel],yval[osel],1)
+        res=np.polyfit(modval[osel],yval[osel],1)
         if res[0]<0:
             print("neg.scale - rejected")
             res=[1,0]
@@ -177,7 +181,7 @@ class Band():
         if self.samp.lay!=None and self.samp.lay.find('SiN')>=0:
             if not 'ksin' in diel:
                 from scipy import interpolate as ip
-                tsin=np.loadtxt(indir+"sinx_cl2.mat",unpack=True,skiprows=3)
+                tsin=np.loadtxt(indir+sinname,unpack=True,skiprows=3)
                 diel['ksin']=ip.interp1d(tsin[0],(tsin[1]+1j*tsin[2])**2)
             epsi=[diel['ksin'](self.ix),diel['ksi'](self.ix)]
         else:
@@ -194,7 +198,7 @@ class Band():
     def fit(self,inval=None,irat=[1.3,-0.15],save=None):
         from scipy import optimize as op
         resid=lambda p:sum((self.absol()[self.sel]-self.model(p)[self.sel])**2)
-        zpar=op.fmin(resid,[inval,irat[0],irat[1]])
+        zpar=op.fmin(resid,[inval,irat[0],irat[1]],full_output=False)
         self.qfit=resid(zpar)
         if save!=None:
             self.samp.thick[save]=zpar[0]
@@ -217,7 +221,7 @@ class Sample():
     wafer=None
     pos=[]
 
-    def __init__(self,fname,laystruct="SiO2/Si",delim=None,maxband=0,data=None):
+    def __init__(self,fname,laystruct="SiO2/Si",delim=None,maxband=0,data=None,headerow=0):
         self.bands=[]
         self.thick={}
         self.chi2={}
@@ -230,11 +234,15 @@ class Sample():
             if not(os.path.exists(fname)):
                 print("file "+fname+" not found")
                 return
-            self.data=np.loadtxt(self.fname,unpack=True,delimiter=delim)
+            self.data=np.loadtxt(self.fname,unpack=True,delimiter=delim,skiprows=headerow)
             if self.data.shape[0]>self.data.shape[1]: self.data=self.data.T
         if maxband==0: maxband=len(self.data)//2
-        for i in range(0,maxband*2,2):
-            self.bands.append(Band(self,i))
+        if maxband<0:
+            for i in range(-1,maxband,-1):
+                self.bands.append(Band(self,i))
+        else:
+            for i in range(0,maxband*2,2):
+                self.bands.append(Band(self,i))
         self.norm=lambda x:1
         if laystruct!=None: self.lay=laystruct
 
@@ -344,9 +352,9 @@ class Wafer():
 
     expos=0
 
-    def __init__(self,pattern,irange,laystruct=None,delim=None,maxband=0):
+    def __init__(self,pattern,irange,laystruct=None,delim=None,maxband=0,headerow=0):
         import os
-        self.samps=[Sample(pattern%i,laystruct=laystruct,delim=delim,maxband=maxband) for i in irange]
+        self.samps=[Sample(pattern%i,laystruct=laystruct,delim=delim,maxband=maxband,headerow=headerow) for i in irange]
         self.samps=[sm for sm in self.samps if len(sm.bands)>0]
         for sm in self.samps:
             sm.wafer=self
