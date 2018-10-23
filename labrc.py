@@ -6,6 +6,7 @@ mean=20
 intime=25
 use_dyndark=0
 soft_smooth=0
+use_shut=1
 
 spec_mode='transmissivity'#'reflectivity'
 spec_unit='eV'

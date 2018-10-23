@@ -1,8 +1,8 @@
 //package specserve;
 
 //init with $env:Path += ";C:\Program Files\Java\jdk1.8.0_171\bin;C:\Program Files\OceanOptics\OmniDriver\OOI_HOME"
-//	 javac -cp "C:\Users\optik\Code\Ocean\OmniDriver\OOI_HOME\OmniDriver.jar;
-//    C:\Users\optik\Code\Ocean\OmniDriver\OOI_HOME\jSerialComm-1.3.11.jar" .\specserve2.java
+//	 javac -cp "C:\Users\optik\Documents\Code\Ocean\OmniDriver\OOI_HOME\OmniDriver.jar;
+//    C:\Users\optik\Documents\Code\Ocean\OmniDriver\OOI_HOME\jSerialComm-1.3.11.jar" .\specserve2.java
 //javac -cp "C:\Program Files\Ocean Optics\OmniDriver\OOI_HOME\OmniDriver.jar;C:
 //\Program Files\Ocean Optics\OmniDriver\jSerialComm-2.0.2.jar" .\specserve2.java
 
@@ -186,6 +186,7 @@ public class specserve2 implements Provider<Source> {
         String query=(String) ctx.get(MessageContext.QUERY_STRING);
         int eqpos;
         String rep=String.format("<p>Hello there [%d]!",cnt);
+        Source reply;
         input = new HashMap<String,Integer>();
         char dir='Y';
         if (query!=null) {
@@ -213,14 +214,39 @@ public class specserve2 implements Provider<Source> {
         int nstep=1;
         int dstep=10;
         //int ipos=0;
-        int shutterbit=7;
+        int shutterbit=3;
         //assert  shutterbit<gpio.getTotalBits()
         int shutterval=0;
         String key5="shut";
         if (input.containsKey(key5)) {
             try {
-               shutterval=input.get(key5);
-               gpio.setValueBit(shutterbit,shutterval==1); //nebo setMuxBit
+                shutterval=input.get(key5);
+                if (shutterval>=1) {
+                  //System.out.println("switching on");
+                  wrapper.setStrobeEnable(specsel,1);}
+                else {
+                  //System.out.println("switching off");
+                  wrapper.setStrobeEnable(specsel,0);
+                }
+               //gpio.setValueBit(shutterbit,shutterval==1); //nebo setMuxBit
+            } catch (Exception ee) {}
+        }
+        key5="setbit";
+        if (input.containsKey(key5)) {
+            try {
+               shutterbit=input.get(key5);
+               System.out.println("setting bit "+shutterbit);
+               gpio.setMuxBit(shutterbit,true); //nebo setMuxBit
+            } catch (Exception ee) {}
+        }
+        key5="delbit";
+        if (input.containsKey(key5)) {
+            shutterbit=input.get(key5);
+            //gpioBitSet = gpio.getValueBits();
+            //shutterval= gpioBitSet.get(shutterbit);
+            System.out.println("bit "+shutterbit+" is "+shutterval);
+            try {
+               gpio.setMuxBit(shutterbit,false); //nebo setMuxBit
             } catch (Exception ee) {}
         }
         String key6="temp";
@@ -290,14 +316,16 @@ public class specserve2 implements Provider<Source> {
 				}
 			}
 			if (i>0)
-				return new StreamSource(new StringReader(rep + exposemul(Arrays.copyOfRange(inmult,0,i),aver) + "</p>"));
+				reply = new StreamSource(new StringReader(rep + exposemul(Arrays.copyOfRange(inmult,0,i),aver) + "</p>"));
 		}
     if (nstep>1) {
         System.out.printf("# scanning "+nstep+" pts \n");
-        return new StreamSource(new StringReader(rep + expoline(nstep,dstep,intime,chsel,aver,dir) + "</p>"));
+        reply = new StreamSource(new StringReader(rep + expoline(nstep,dstep,intime,chsel,aver,dir) + "</p>"));
       }
     else
-        return new StreamSource(new StringReader(rep + expose(intime,chsel,aver) + "</p>"));
+        reply = new StreamSource(new StringReader(rep + expose(intime,chsel,aver) + "</p>"));
+    if (shutterval==2) wrapper.setStrobeEnable(specsel,0);
+    return reply;
   }
 
 

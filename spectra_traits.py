@@ -62,7 +62,7 @@ class Experiment(HasTraits):
     aver = Int(rc.mean, label="averaging",desc="repeated meas.")
     smooth = Range(1,50,rc.smoothing,label="smooth",desc="level of smoothing")
     median = Int(1,label="software median",desc="more robust averaging")
-    shut = Bool(True,label="light shutter",desc="open when checked")
+    shut = Bool(rc.use_shut,label="light shutter",desc="open shutter for measurement only")
     record = Bool(False,label="store next",desc="put in stack")
     combine = Bool(rc.chan_combine,label="combine multichannel")
     sname = File(label="Filename")
@@ -87,11 +87,12 @@ class Experiment(HasTraits):
                 menubar=menubar,width=10)
 
     def _shut_changed(self):
-        import urllib2
+        #import urllib2
         if self.instr==None: return
-        query=self.instr.path+"0&shut=%i"%int(self.shut)
+        rc.use_shut=1 if self.shut else 0
+        #query=self.instr.path+"0&shut=%i"%int(self.shut)
         #rep=urllib2.urlopen(query).read()
-        message(query)
+        #message(query)
 
     def _expo_changed(self):
         if self.instr!=None: self.instr.intime=int(self.expo)
@@ -154,24 +155,42 @@ class Experiment(HasTraits):
     def _saveall_fired(self):
         from numpy import concatenate,array,savetxt
         self.display("stack saved ...")
-        speclst=[concatenate([[0,0],self.instr.pixtable])]
-        for k in self.stack.keys():
-            scode=k.split("_")
+        if self.combine: clist=[0]
+        else: clist=range(1,len(self.instr.chanval)+1)
+        for cn in clist:
+            if cn>0: speclst=[concatenate([[0,0],self.instr.chanene[cn-1]])]
+            else: speclst=[concatenate([[0,0],self.instr.pixtable])]
+            for k in self.stack.keys():
+                scode=k.split("_")
+                try:
+                    ix,iy=float(scode[1]),float(scode[2])
+                except:
+                    continue
+                #poslst.append([ix,iy])
+                if cn>0:
+                    speclst.append(concatenate([[ix,iy],self.stack[k][cn-1]]))
+                else:
+                    speclst.append(concatenate([[ix,iy],self.stack[k]]))
+            oname=self.sname
+            if cn>0:
+                oname=oname.replace(".","_%i."%cn)
             try:
-                ix,iy=float(scode[1]),float(scode[2])
+                savetxt(oname,array(speclst).T,fmt="%8.5f")
             except:
-                continue
-            #poslst.append([ix,iy])
-            speclst.append(concatenate([[ix,iy],self.stack[k]]))
-        savetxt(self.sname,array(speclst).T,fmt="%8.5f")
-        print(self.sname+" saved /"+str(len(speclst)))
+                print("cannot save")
+            print(oname+" saved /"+str(array(speclst).shape))
 
     def _darken_fired(self,interrupt=True):
         if self.paren.acquisition_thread and interrupt and self.paren.acquisition_thread.isAlive():
             self.paren.acquisition_thread.wants_abort = True
-        message(" block the light beam, please ", title = 'User request')
+        if self.shut:
+            rc.use_shut=0
+        else:
+            message(" block the light beam, please ", title = 'User request')
         self.instr.dark=self.instr.result(sub_dark=False,div_flat=False,smooth=self.smooth,maxit=-1) #no correction/calibration
         self.paren.status_string="dark curr. saved"
+        if self.shut:
+            rc.use_shut=1
         #if self.config!=None: self.config.adjust_image()
 
     def _refer_fired(self,interrupt=True):

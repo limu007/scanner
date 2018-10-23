@@ -1188,9 +1188,9 @@ class webocean(specscope):
             self.splog.append(gline.decode())
         if len(self.splog)>2000: self.splog=self.splog[-1000:]
         if len(dstring)<minlen:
-            print("truncated data: exiting\n"+dstring.decode('u8'))
+            print("truncated data: exiting\n"+dstring)#.decode('u8'))
             return
-        if loud>1: print(dstring.decode('u8'))
+        if loud>1: print(dstring)#.decode('u8'))
         try:
             rep=etree.fromstring(dstring)
             return rep
@@ -1267,7 +1267,9 @@ class webocean(specscope):
         else:
             query=self.path+"%i&chan=%i"%(self.intime,chan)
         query+="&corr=%i"%(2*self.darkcorr+self.nonlincorr)
-
+        if rc.use_shut>0: query+="&shut=2"  
+        else:  query+="&shut=0"
+        
         if self.config.m_NrAverages>1: query+="&avg=%i"%self.config.m_NrAverages
         if loud>0: print(query)
         return query
