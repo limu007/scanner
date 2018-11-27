@@ -248,7 +248,8 @@ class Scan(HasTraits):
     centstr=String("[0,0]",label="Center")
     centpos=[0,0]
     ready=Bool(False)
-    gpos = Button("Get Position")
+    getpos = Button("Get Position")
+    gopos = Button("Goto")
 
     up = Button("Up")
     down = Button("Down")
@@ -265,9 +266,10 @@ class Scan(HasTraits):
                 HGroup(Item('radius', enabled_when="centerstart"),Item('centstr',style='readonly')),
                 HGroup(Item('centerstart'),Item('retlast'),Item('zigzag'),Item('design',show_label=False),Item('dump',show_label=False),Item('pclear',show_label=False)),
                 HGroup(Item('up',show_label=False),Item('down',show_label=False),
-                    Item('left',show_label=False),Item('right',show_label=False),Item('ptskip',show_label=False),Item('gpos',show_label=False),enabled_when="ready"),
-                HGroup(Item('npoints',style='readonly'),Item('cpos'),Item('shome',show_label=False),Item('srefer',show_label=False),Item('gocenter',show_label=False),Item('setcenter',show_label=False),
-                    Item('cmeasure',show_label=False),enabled_when="ready"),
+                    Item('left',show_label=False),Item('right',show_label=False),
+                    Item('getpos',show_label=False),Item('cpos'),Item('gopos',show_label=False),enabled_when="ready"),
+                HGroup(Item('npoints',style='readonly'),Item('shome',show_label=False),Item('srefer',show_label=False),
+                    Item('gocenter',show_label=False),Item('setcenter',show_label=False),enabled_when="ready"),#Item('cmeasure',show_label=False)
                 Item('speed',show_label=True),
                 label="Scanner", layout='split',
                 )
@@ -290,13 +292,13 @@ class Scan(HasTraits):
         from numpy import mgrid,newaxis,array
         #self.centpos=rc.xy_cent#self.setup()
         self.centstr=str(list(self.centpos))
-        self.program=mgrid[:self.Xpts,:self.Ypts]*(array([self.Xstep,self.Ystep]).reshape(2,1,1))
+        self.program=mgrid[:self.Xpts,:self.Ypts]*(array([self.Xstep,self.Ystep]).reshape(2,1,1))#.astype('float64')
         if self.zigzag:
             for i in range(1,self.Xpts,2):
                 self.program[1][i]=self.program[1][i][::-1]
-        center=array(self.centpos).reshape(2,1,1)
+        center=array(self.centpos).reshape(2,1,1).astype('int32')
         if self.centerstart:
-            self.program+=center
+            self.program=self.program+center
             self.program[0]-=int(self.Xpts*self.Xstep/2.)
             self.program[1]-=int(self.Ypts*self.Ystep/2.)
         if self.radius>0:
@@ -306,21 +308,30 @@ class Scan(HasTraits):
             #self.program=array(self.program)
             sel=((self.program-center)**2).sum(0)<self.radius**2
             print("selected %i points"%sum(sel))
-            self.program=list(self.program[:,sel].T)
+            self.program=self.program[:,sel].T
         else:
-            self.program=list(self.program.reshape(2,self.Xpts*self.Ypts).T)
+            self.program=self.program.reshape(2,self.Xpts*self.Ypts).T
+        sel=self.program[0]>0
+        sel*=self.program[1]>0
+        sel*=self.program[0]<=rc.xy_size[0]
+        sel*=self.program[1]<rc.xy_size[1]
+        self.program=list(self.program[:,sel])
         if self.retlast:
-            self.program.append([float(a) for a in self.actpos])
+            self.program.append([int(a) for a in self.actpos])
         self.npoints=len(self.program)
         if 'plan' in self.exelist: #vykreslit
+            self.exelist['plan'].experiment.display("%i points out of accessible area"%(len(sel)-sum(sel)))
             self.exelist['plan'].design_show(self.program)
             self.exelist['plan'].experiment.clear_stack()
         self.since_calib=0
 
     def _srefer_fired(self):
-        self.instr.goto(rc.refer_pos[0],rc.refer_pos[1])
+        #self.instr.goto(rc.refer_pos[0],rc.refer_pos[1]) #to be tested!!
+        self.cpos[1:-1]=str([int(a) for a in list(rc.refer_pos)])
+        self.instr.goto(rc.refer_pos)#_gopos_fired()
 
-    def _cpos_changed(self):
+    def _gopos_fired(self):#_cpos_changed(self):
+        #modified center position
         gpos=self.cpos[1:-1].strip().split(',')
         if len(gpos)==2:
             try:
@@ -334,10 +345,10 @@ class Scan(HasTraits):
         if self.instr: self.instr.ahome()
         for i in range(2):
             self.actpos[i]=rc.xy_cent[i]
-        self.cpos=str(list(self.actpos))
+        self.cpos=str([int(a) for a in list(self.actpos)])
         self.setup()
 
-    def _gpos_fired(self):
+    def _getpos_fired(self):
         self.instr.awrite("M114")
         inp=self.instr.acomm()
         for l in inp:
@@ -351,7 +362,7 @@ class Scan(HasTraits):
                     elif k.find('Y')>=0:
                         ival=float(k[k.find(':')+1:])
                         self.actpos[1]=int(ival)
-                self.cpos=str(list(self.actpos))
+                self.cpos=str([int(a) for a in list(self.actpos)])
 
     def _cmeasure_fired(self):
         print("trying to find wafer center [currently %s]"%str(self.centpos))
@@ -360,7 +371,7 @@ class Scan(HasTraits):
 
     def _setcenter_fired(self):
         print("current position as wafer center")
-        self._gpos_fired()
+        self._getpos_fired()
         self.centpos=self.actpos
         self.centstr=str(list(self.centpos))
         print("center now at "+self.centstr)
@@ -372,20 +383,28 @@ class Scan(HasTraits):
         self.instr.goto(self.centpos[0],self.centpos[1])
 
     def _right_fired(self):
-        if self.instr: self.instr.rate(2,self.Ystep)
-        self.actpos[1]+=self.Ystep
-
-    def _left_fired(self):
-        if self.instr: self.instr.rate(2,-self.Ystep)
-        self.actpos[1]-=self.Ystep
-
-    def _down_fired(self):
-        if self.instr: self.instr.rate(1,-self.Xstep)
-        self.actpos[0]-=self.Xstep
-
-    def _up_fired(self):
         if self.instr: self.instr.rate(1,self.Xstep)
         self.actpos[0]+=self.Xstep
+        #if self.instr: self.instr.rate(2,self.Ystep)
+        #self.actpos[1]+=self.Ystep
+
+    def _left_fired(self):
+        if self.instr: self.instr.rate(1,-self.Xstep)
+        self.actpos[0]-=self.Xstep
+        #if self.instr: self.instr.rate(2,-self.Ystep)
+        #self.actpos[1]-=self.Ystep
+
+    def _down_fired(self):
+        if self.instr: self.instr.rate(2,self.Ystep)
+        self.actpos[1]+=self.Ystep
+        #if self.instr: self.instr.rate(1,-self.Xstep)
+        #self.actpos[0]-=self.Xstep
+
+    def _up_fired(self):
+        if self.instr: self.instr.rate(2,-self.Ystep)
+        self.actpos[1]-=self.Ystep
+        #if self.instr: self.instr.rate(1,self.Xstep)
+        #self.actpos[0]+=self.Xstep
 
     def _ptskip_fired(self):
         if len(self.program)==0: return
@@ -409,7 +428,15 @@ class Scan(HasTraits):
 
     def next_point(self):
         from time import sleep
-        if len(self.program)==0: return
+        exper=self.exelist['plan'].experiment
+        if len(self.program)==0:
+            if self.since_calib>0: #at least some points measured
+                # will stop acquisition and save data
+                self.exelist['plan']._start_stop_acquisition_fired()
+                if exper.sname!="": exper._saveall_fired()
+                message(" scan finished! ", title = 'User mess')
+                self.since_calib=0
+            return
         point=self.program.pop(0)
         if hasattr(self.instr,'ard'):
             if hasattr(self.instr,'goto'):
@@ -420,12 +447,12 @@ class Scan(HasTraits):
         else:
             print("riding %i,%i"%(point[0],point[1]))
             sleep(10-self.speed)
-        if self.exelist['plan'].experiment.recalper>0 and self.since_calib>=self.exelist['plan'].experiment.recalper:
+        if exper.recalper>0 and self.since_calib>=exper.recalper:
             # recalibration planned
             if rc.refer_pos[0]*rc.refer_pos[1]>0: #have calibration sample
                 self._srefer_fired() # goto reference sample
                 sleep(5-self.speed)
-                self.exelist['plan'].experiment._refer_fired(interrupt=False) #measure reference
+                exper._refer_fired(interrupt=False) #measure reference
                 self.since_calib=0        
         self.actpos=[float(p) for p in point]
         self.npoints-=1
@@ -521,7 +548,7 @@ class Spectrac(HasTraits):
     port = Int(rc.web_port, label="connect. port no.")
     #Item('elow'), Item('ehigh'),
     setmeup = Button("Initialize")
-    equalize = Button("Equal")
+    equalize = Button("Equalize channels")
     calib = Button("Calibrate SiO2")
     #singlechan= List(Str,['all channels','single channel'],label='select channels')
     singlechan=Str#,Enum(['all channels','single channel'])
@@ -541,7 +568,7 @@ class Spectrac(HasTraits):
     view = View(VGroup(
                 Item('erange', editor=BoundsEditor(low_name = 'elow', high_name = 'ehigh')),
                 Item('simulate'),
-                HSplit(Item('resol',width=5),Item('cooltemp',width=5, enabled_when='cooler'),),
+                HSplit(Item('resol',width=5),Item('cooltemp',width=5, enabled_when='cooler==True'),),
                 HSplit(Item('darkcorr',width=5),Item('nonlincorr',width=5),),
                 HSplit(Item('norm',style='simple',label="channel equalizer", enabled_when='instr!=None'),
                     #Item('singlechan',show_label=False, editor=ListEditor(style='readonly'),style='simple', enabled_when='instr!=None'),
@@ -1054,6 +1081,7 @@ class ControlPanel(HasTraits):
             mdis=(pp[1]-pp[0])*0.02
             ax.set_xlim(pp[0]-mdis,pp[1]+mdis)
             pp=ax.get_ylim()
+            if pp[0]<pp[1]: pp=pp[::-1]
             ax.set_ylim(pp[0]-mdis,pp[1]+mdis)
         self.design.canvas.draw()
 

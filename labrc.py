@@ -139,7 +139,7 @@ underate=5.
 graph_min=0.1
 
 refer_pos=[5,70]
-xy_size=[160,160]
+xy_size=[200,140]
 
 scan_realtime=False # multitasking - analysis in real time
 scan_start_analysis=False
