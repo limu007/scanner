@@ -327,10 +327,15 @@ class Scan(HasTraits):
             self.exelist['plan'].experiment.clear_stack()
         self.since_calib=0
 
+    def disp_pos(self):
+        self.cpos=str([int(a) for a in list(self.actpos)])
+
     def _srefer_fired(self):
         #self.instr.goto(rc.refer_pos[0],rc.refer_pos[1]) #to be tested!!
-        self.cpos=str([int(a) for a in list(rc.refer_pos)])
+        from numpy import array
         self.instr.goto(*rc.refer_pos)#_gopos_fired()
+        self.actpos=array(rc.refer_pos)
+        self.disp_pos()
 
     def _gopos_fired(self):#_cpos_changed(self):
         #modified center position
@@ -347,7 +352,7 @@ class Scan(HasTraits):
         if self.instr: self.instr.ahome()
         for i in range(2):
             self.actpos[i]=rc.xy_cent[i]
-        self.cpos=str([int(a) for a in list(self.actpos)])
+        self.disp_pos()
         self.setup()
 
     def _getpos_fired(self):
@@ -364,7 +369,7 @@ class Scan(HasTraits):
                     elif k.find('Y')>=0:
                         ival=float(k[k.find(':')+1:])
                         self.actpos[1]=int(ival)
-                self.cpos=str([int(a) for a in list(self.actpos)])
+                self.disp_pos()
 
     def _cmeasure_fired(self):
         print("trying to find wafer center [currently %s]"%str(self.centpos))
@@ -382,32 +387,39 @@ class Scan(HasTraits):
             print("actual position misplaced - skipping")
 
     def _actpos_changed(self):
-        self.cpos=str([int(a) for a in list(self.actpos)])
+        self.disp_pos()
 
     def _gocenter_fired(self):
+        from numpy import array
         self.instr.goto(self.centpos[0],self.centpos[1])
+        self.actpos=array(self.centpos)
+        self.disp_pos()
 
     def _right_fired(self):
         if self.instr: self.instr.rate(1,self.Xstep)
         self.actpos[0]+=self.Xstep
+        self.disp_pos()
         #if self.instr: self.instr.rate(2,self.Ystep)
         #self.actpos[1]+=self.Ystep
 
     def _left_fired(self):
         if self.instr: self.instr.rate(1,-self.Xstep)
         self.actpos[0]-=self.Xstep
+        self.disp_pos()
         #if self.instr: self.instr.rate(2,-self.Ystep)
         #self.actpos[1]-=self.Ystep
 
     def _down_fired(self):
         if self.instr: self.instr.rate(2,self.Ystep)
         self.actpos[1]+=self.Ystep
+        self.disp_pos()
         #if self.instr: self.instr.rate(1,-self.Xstep)
         #self.actpos[0]-=self.Xstep
 
     def _up_fired(self):
         if self.instr: self.instr.rate(2,-self.Ystep)
         self.actpos[1]-=self.Ystep
+        self.disp_pos()
         #if self.instr: self.instr.rate(1,self.Xstep)
         #self.actpos[0]+=self.Xstep
 
@@ -460,6 +472,7 @@ class Scan(HasTraits):
                 exper._refer_fired(interrupt=False) #measure reference
                 self.since_calib=0        
         self.actpos=[float(p) for p in point]
+        self.disp_pos()
         self.npoints-=1
         self.since_calib+=1
         #self.cpos=str(list(self.actpos))
