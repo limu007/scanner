@@ -322,7 +322,7 @@ class Scan(HasTraits):
         self.npoints=len(self.program)
         if 'plan' in self.exelist: #vykreslit
             self.exelist['plan'].experiment.display("%i points out of accessible area"%(len(sel)-sum(sel)))
-            print("plotting %i points"%(len(self.program))
+            print("plotting %i points"%(len(self.program)))
             self.exelist['plan'].design_show(self.program)
             self.exelist['plan'].experiment.clear_stack()
         self.since_calib=0
@@ -375,7 +375,7 @@ class Scan(HasTraits):
         print("current position as wafer center")
         self._getpos_fired()
         if len(self.actpos)==2: #sanity check
-            self.centpos=self.actpos
+            self.centpos=self.actpos.copy()
             self.centstr=str(list(self.centpos))
             print("center now at "+self.centstr)
         else:
@@ -776,6 +776,7 @@ class Analyse(HasTraits):
                 )#, enabled_when="config!=None")
     calculate = Event
     func=None
+    paren=None
     vals=[]
 
     def evalme(self):
@@ -900,6 +901,7 @@ class ControlPanel(HasTraits):
         self.experiment.paren = self
         self.spectrac.exper = self.experiment
         self.spectrac.paren = self
+        self.analyse.paren = self
         #if rc.auto_init: self.spectrac.setup()
         self.scanner.exelist['spectrac']=self.spectrac
         self.scanner.exelist['plan']=self
