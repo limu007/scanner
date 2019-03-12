@@ -118,7 +118,7 @@ class Experiment(HasTraits):
         if self.paren.scanner!=None and self.paren.scanner.ready:
             sname="pos"
             if len(self.paren.scanner.program)>0: sname="scan"
-            sname+="_%03i_%03i"%tuple(self.paren.scanner.actpos)
+            sname+="_%03i_%03i"%tuple(self.paren.scanner.actpos[:2])
             return sname
         if not self.record: return defname
         lstack=[i for i in self.stack.keys() if i.find(defname+"_")==0]
@@ -173,7 +173,8 @@ class Experiment(HasTraits):
                     speclst.append(concatenate([[ix,iy],self.stack[k]]))
             oname=self.sname
             if cn>0:
-                oname=oname.replace(".","_%i."%cn)
+                if oname.find('.')>0: oname=oname.replace(".","_%i."%cn)
+                else: oname=oname+"_%i."%cn
             try:
                 savetxt(oname,array(speclst).T,fmt="%8.5f")
             except:
@@ -308,27 +309,28 @@ class Scan(HasTraits):
             #self.program=array(self.program)
             sel=((self.program-center)**2).sum(0)<self.radius**2
             print("selected %i points"%sum(sel))
-            self.program=self.program[:,sel].T
+            self.program=self.program[:,sel]
         else:
-            self.program=self.program.reshape(2,self.Xpts*self.Ypts).T
+            self.program=self.program.reshape(2,self.Xpts*self.Ypts) #zrusena transpozice
         sel=self.program[0]>0
         sel*=self.program[1]>0
-        sel*=self.program[0]<=rc.xy_size[0]
+        sel*=self.program[0]<rc.xy_size[0]
         sel*=self.program[1]<rc.xy_size[1]
-        self.program=list(self.program[:,sel])
+        self.program=list(self.program[:,sel].T)
         if self.retlast:
             self.program.append([int(a) for a in self.actpos])
         self.npoints=len(self.program)
         if 'plan' in self.exelist: #vykreslit
             self.exelist['plan'].experiment.display("%i points out of accessible area"%(len(sel)-sum(sel)))
+            print("plotting %i points"%(len(self.program))
             self.exelist['plan'].design_show(self.program)
             self.exelist['plan'].experiment.clear_stack()
         self.since_calib=0
 
     def _srefer_fired(self):
         #self.instr.goto(rc.refer_pos[0],rc.refer_pos[1]) #to be tested!!
-        self.cpos[1:-1]=str([int(a) for a in list(rc.refer_pos)])
-        self.instr.goto(rc.refer_pos)#_gopos_fired()
+        self.cpos=str([int(a) for a in list(rc.refer_pos)])
+        self.instr.goto(*rc.refer_pos)#_gopos_fired()
 
     def _gopos_fired(self):#_cpos_changed(self):
         #modified center position
@@ -372,9 +374,12 @@ class Scan(HasTraits):
     def _setcenter_fired(self):
         print("current position as wafer center")
         self._getpos_fired()
-        self.centpos=self.actpos
-        self.centstr=str(list(self.centpos))
-        print("center now at "+self.centstr)
+        if len(self.actpos)==2: #sanity check
+            self.centpos=self.actpos
+            self.centstr=str(list(self.centpos))
+            print("center now at "+self.centstr)
+        else:
+            print("actual position misplaced - skipping")
 
     def _actpos_changed(self):
         self.cpos=str([int(a) for a in list(self.actpos)])
@@ -434,7 +439,7 @@ class Scan(HasTraits):
                 # will stop acquisition and save data
                 self.exelist['plan']._start_stop_acquisition_fired()
                 if exper.sname!="": exper._saveall_fired()
-                message(" scan finished! ", title = 'User mess')
+                #message(" scan finished! ", title = 'User mess')
                 self.since_calib=0
             return
         point=self.program.pop(0)
@@ -550,7 +555,6 @@ class Spectrac(HasTraits):
     setmeup = Button("Initialize")
     equalize = Button("Equalize channels")
     calib = Button("Calibrate SiO2")
-    #singlechan= List(Str,['all channels','single channel'],label='select channels')
     singlechan=Str#,Enum(['all channels','single channel'])
     chanlist=['single channel']
     chanshow = Button("Show channels")
@@ -761,12 +765,13 @@ class Analyse(HasTraits):
     ehigh = Float(5.5, label="to", desc="upper energy band")
     code = Code("return xdat.mean(),ydat.mean()")
     run = Button('Eval')
+    debug = Button('Debug')
     res = Button('Reset')
     output = String("here comes the data",label="Output")
     view = View(
                 Item('erange', editor=BoundsEditor(low_name = 'elow', high_name = 'ehigh')),
                 Item('code',show_label=False),
-                HGroup(Item('run',show_label=False),Item('res',show_label=False),),
+                HGroup(Item('run',show_label=False),Item('res',show_label=False),Item('debug',show_label=False),),
                 Item('output',show_label=False,style='readonly')
                 )#, enabled_when="config!=None")
     calculate = Event
@@ -780,6 +785,13 @@ class Analyse(HasTraits):
         return self.func(xdat[sel],ydat[sel])
 
     def _reset_fired(self):
+        self.vals=[]
+
+    def _debug_fired(self):
+        try:
+            self.output=str(eval(self.code))
+        except:
+            self.output="Error in expression"
         self.vals=[]
 
     def _run_fired(self):
@@ -944,7 +956,7 @@ class ControlPanel(HasTraits):
         else: #starting....
             #self.figure.clean()
             from numpy import iterable
-            if self.spect_last!=None:
+            if self.spect_last!=None: #cleaning
                 if iterable(self.spect_last):
                     cnt=len(self.spect_last)
                     for sp in self.spect_last: sp.remove()

@@ -1,2 +1,2 @@
 def runme(xdat,ydat):
-    return xdat.mean(),ydat.mean()
+    return self.paren.scanner.actpos
