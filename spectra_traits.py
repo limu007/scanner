@@ -232,8 +232,8 @@ class Scan(HasTraits):
 
     Xpts = Int(10, label="X points", desc="fast axis/radial")
     Ypts = Int(10, label="Y points", desc="slow axis/azimuth")
-    Xstep = Int(rc.cart_step, label="X step", desc="instrumental steps")
-    Ystep = Int(rc.cart_step, label="Y step", desc="instrumental steps")
+    Xstep = Float(rc.cart_step, label="X step", desc="instrumental steps")
+    Ystep = Float(rc.cart_step, label="Y step", desc="instrumental steps")
     centerstart = Bool(True, label="start at center")
     retlast = Bool(False, label="return to origin")
     zigzag = Bool(True, label="scan in both directions")
@@ -300,8 +300,8 @@ class Scan(HasTraits):
         center=array(self.centpos).reshape(2,1,1).astype('int32')
         if self.centerstart:
             self.program=self.program+center
-            self.program[0]-=int(self.Xpts*self.Xstep/2.)
-            self.program[1]-=int(self.Ypts*self.Ystep/2.)
+            self.program[0]-=(self.Xpts*self.Xstep/2.)
+            self.program[1]-=(self.Ypts*self.Ystep/2.)
         if self.radius>0:
             #for i in range(2):
             #    self.program[i]+=self.centpos[i]
@@ -328,13 +328,15 @@ class Scan(HasTraits):
         self.since_calib=0
 
     def disp_pos(self):
-        self.cpos=str([int(a) for a in list(self.actpos)])
+        #self.cpos=str([int(a) for a in list(self.actpos)])
+        from numpy import round
+        self.cpos=str([round(float(a),1) for a in list(self.actpos)])
 
     def _srefer_fired(self):
         #self.instr.goto(rc.refer_pos[0],rc.refer_pos[1]) #to be tested!!
         from numpy import array
         self.instr.goto(*rc.refer_pos)#_gopos_fired()
-        self.actpos=array(rc.refer_pos)
+        self.actpos=rc.refer_pos
         self.disp_pos()
 
     def _gopos_fired(self):#_cpos_changed(self):
@@ -350,8 +352,9 @@ class Scan(HasTraits):
     def _shome_fired(self):
         # reset axis
         if self.instr: self.instr.ahome()
-        for i in range(2):
-            self.actpos[i]=rc.xy_cent[i]
+        #for i in range(2):
+        #    self.actpos[i]=rc.xy_cent[i]
+        self.actpos=rc.xy_cent
         self.disp_pos()
         self.setup()
 
@@ -365,10 +368,10 @@ class Scan(HasTraits):
                 for k in sl.split('.0'):
                     if k.find('X')>=0:
                         ival=float(k[k.find(':')+1:])
-                        self.actpos[0]=int(ival)
+                        self.actpos[0]=float(ival)
                     elif k.find('Y')>=0:
                         ival=float(k[k.find(':')+1:])
-                        self.actpos[1]=int(ival)
+                        self.actpos[1]=float(ival)
                 self.disp_pos()
 
     def _cmeasure_fired(self):
@@ -392,7 +395,7 @@ class Scan(HasTraits):
     def _gocenter_fired(self):
         from numpy import array
         self.instr.goto(self.centpos[0],self.centpos[1])
-        self.actpos=array(self.centpos)
+        self.actpos=self.centpos
         self.disp_pos()
 
     def _right_fired(self):

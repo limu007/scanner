@@ -30,7 +30,9 @@ spectr_nb_trials=3
 #----------------------------
 polar_stage=False
 
-xy_cent=95,125
+xy_cent=[95,125]
+refer_pos=[5,70]
+xy_size=[200,140]
 scan_axes_order=0 # for rot. stage 0= radial first, 1=rotate first
                   # for lin. stage 0= upper first, 1=lower first
 base_xdir=1 # -1 for xy-scanner, +1 for rotation stage
@@ -137,9 +139,6 @@ eranges=[[1.33,1.66],[1.4,2.08],[1.46,2.28]] # ranges for period extraction in e
 init_ox_set=False
 underate=5.
 graph_min=0.1
-
-refer_pos=[5,70]
-xy_size=[200,140]
 
 scan_realtime=False # multitasking - analysis in real time
 scan_start_analysis=False
