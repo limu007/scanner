@@ -30,9 +30,9 @@ spectr_nb_trials=3
 #----------------------------
 polar_stage=False
 
-xy_cent=[95,125]
+xy_cent=[95,95]
 refer_pos=[5,70]
-xy_size=[200,140]
+xy_size=[200,170]
 scan_axes_order=0 # for rot. stage 0= radial first, 1=rotate first
                   # for lin. stage 0= upper first, 1=lower first
 base_xdir=1 # -1 for xy-scanner, +1 for rotation stage
@@ -41,7 +41,9 @@ auto_init=False
 comm_ard_wait=0.05 # delay in sec between subsequent commands to Arduino
 simu_wait=1.1
 ard_port="COM3" #COM4
-ard_speed=250000
+ard_speed=250000 #communication with Velleman
+
+#arduion specific
 ard_mode=2 #1-single drive, 2-double
 ard_comver=2 #python 2/3 serial communication
 #ard_port=None #'COM3'#'/dev/ttyUSB0'
@@ -69,6 +71,7 @@ rot_linear_zero=7100 #steps from center to right edge for rotational setup
 
 # stepper linear motor
 motor_lin_wait=0.1
+motor_lin_gap=0.5
 motor_lin_speed=0.0005  #sec/step
 motor_lin_rate=3 #ms/step
 
@@ -182,3 +185,5 @@ line_width=0.5
 
 graph_max=5.
 vert_exten=0.2
+
+save_period=10

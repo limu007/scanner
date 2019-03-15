@@ -73,17 +73,18 @@ class Experiment(HasTraits):
     refermat = Enum(reflist)
     ready = Bool(False)
     paren = None
-    errb = Bool(False,label="error",desc="show error band")
+    errb = Bool(False,label="errorband",desc="whether display error band")
     recalper = Int(0,label="recalib. period",desc="regular calibration during scanning")
 
     menubar = MenuBar(Menu(Action(name='test Action', action='_run_action'), name="Menu"))
 
-    view = View(Item('expo',width=5), Item('aver',resizable=True,width=5),
+    view = View(HGroup(Item('expo',width=5), Item('aver',resizable=True,width=5),),
                 HGroup(Item('shut'),Item('median',width=5),Item('combine'), Item('smooth',enabled_when="combine==False")),
                 HGroup(Item('refer',show_label=False, enabled_when="ready"),Item('darken',show_label=False, enabled_when="ready"),
                 Item('recalper',enabled_when="ready"),),
                 HGroup(Item('sname'),Item('saveme',show_label=False, enabled_when="sname!=''"),Item('record')),
-                HGroup(Item('saveall',show_label=False, enabled_when="sname!=''"),Item('refermat',label="Ref. material")),Item('errb'),#editor=CheckListEditor(values=reflist)
+                HGroup(Item('saveall',show_label=False, enabled_when="sname!=''"),Item('refermat',label="Ref. material")),
+                Item('errb'),#editor=CheckListEditor(values=reflist)
                 menubar=menubar,width=10)
 
     def _shut_changed(self):
@@ -237,7 +238,7 @@ class Scan(HasTraits):
     centerstart = Bool(True, label="start at center")
     retlast = Bool(False, label="return to origin")
     zigzag = Bool(True, label="scan in both directions")
-    radius = Int(50, label="wafer radius", desc="in mm")
+    radius = Float(50, label="wafer radius", desc="in mm")
     design = Button("Plan")
     dump = Button("Show")
     pclear = Button("Clear")
@@ -264,14 +265,15 @@ class Scan(HasTraits):
     view = View(VFold(
                 HGroup(Item('Xpts',width=intwid),Item('Ypts',width=intwid),Item('Xstep',width=intwid),Item('Ystep',width=intwid)),
                 #HGroup(Item('Xstep'),Item('Ystep')),
-                HGroup(Item('radius', enabled_when="centerstart"),Item('centstr',style='readonly')),
+                HGroup(Item('radius', enabled_when="centerstart"),Item('centstr',style='readonly'),
+                    Item('gocenter',show_label=False),Item('setcenter',show_label=False),enabled_when="ready"),
                 HGroup(Item('centerstart'),Item('retlast'),Item('zigzag'),Item('design',show_label=False),Item('dump',show_label=False),Item('pclear',show_label=False)),
                 HGroup(Item('up',show_label=False),Item('down',show_label=False),
-                    Item('left',show_label=False),Item('right',show_label=False),
-                    Item('getpos',show_label=False),Item('cpos'),Item('gopos',show_label=False),enabled_when="ready"),
+                    Item('left',show_label=False),Item('right',show_label=False),enabled_when="ready"),
                 HGroup(Item('npoints',style='readonly'),Item('shome',show_label=False),Item('srefer',show_label=False),
-                    Item('gocenter',show_label=False),Item('setcenter',show_label=False),enabled_when="ready"),#Item('cmeasure',show_label=False)
-                Item('speed',show_label=True),
+                     Item('getpos',show_label=False),Item('cpos'),Item('gopos',show_label=False),enabled_when="ready"),
+                    #Item('cmeasure',show_label=False)
+                #Item('speed',show_label=True),
                 label="Scanner", layout='split',
                 )
             )
@@ -322,7 +324,7 @@ class Scan(HasTraits):
         self.npoints=len(self.program)
         if 'plan' in self.exelist: #vykreslit
             self.exelist['plan'].experiment.display("%i points out of accessible area"%(len(sel)-sum(sel)))
-            print("plotting %i points"%(len(self.program)))
+            print("plotting %i points (%i removed)"%(len(self.program),len(sel)-sum(sel)))
             self.exelist['plan'].design_show(self.program)
             self.exelist['plan'].experiment.clear_stack()
         self.since_calib=0
@@ -341,7 +343,7 @@ class Scan(HasTraits):
 
     def _gopos_fired(self):#_cpos_changed(self):
         #modified center position
-        gpos=self.cpos[1:-1].strip().split(',')
+        gpos=self.cpos.replace('[','').replace(']','').strip().split(',')
         if len(gpos)==2:
             try:
                 pos=[int(float(g)) for g in gpos]
@@ -457,6 +459,8 @@ class Scan(HasTraits):
                 #message(" scan finished! ", title = 'User mess')
                 self.since_calib=0
             return
+        if self.since_calib>0 and rc.save_period>0 and self.since_calib%rc.save_period==0:
+            if exper.sname!="": exper._saveall_fired()
         point=self.program.pop(0)
         if hasattr(self.instr,'ard'):
             if hasattr(self.instr,'goto'):
