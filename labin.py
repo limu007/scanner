@@ -1000,7 +1000,7 @@ class linuscope(avantes):
             print('saturating')
             self.config.m_IntegrationTime=int(self.config.m_IntegrationTime*0.8)
 
-def webfetch(url,timeout=4,ver=1):
+def webfetch(url,timeout=4,ver=2):
     if ver==1:
         from urllib import request
         try:
@@ -1188,7 +1188,7 @@ class webocean(specscope):
             self.splog.append(gline.decode())
         if len(self.splog)>2000: self.splog=self.splog[-1000:]
         if len(dstring)<minlen:
-            print("truncated data: exiting\n"+dstring)#.decode('u8'))
+            print("truncated data: exiting\n"+str(dstring))#.decode('u8'))
             return
         if loud>1: print(dstring)#.decode('u8'))
         try:
@@ -1370,6 +1370,8 @@ class uniocean(webocean):
         return reband.Sample(None,data=concatenate([[self.chanene[i],data[i]] for i in range(len(self.chanene))]))
     
     def setflat(self,minval=3,perc=3,fresh=True,smooth=30):
+        '''calculates tranformation table
+        '''
         from numpy import iterable,zeros_like
         if fresh: data=self.measure().copy()
         else: data=self.chanval.copy()

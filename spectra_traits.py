@@ -80,7 +80,7 @@ class Experiment(HasTraits):
 
     view = View(HGroup(Item('expo',width=5), Item('aver',resizable=True,width=5),),
                 HGroup(Item('shut'),Item('median',width=5),Item('combine'), Item('smooth',enabled_when="combine==False")),
-                HGroup(Item('refer',show_label=False, enabled_when="ready"),Item('darken',show_label=False, enabled_when="ready"),
+                HGroup(Item('darken',show_label=False, enabled_when="ready"),Item('refer',show_label=False, enabled_when="ready"),
                 Item('recalper',enabled_when="ready"),),
                 HGroup(Item('sname'),Item('saveme',show_label=False, enabled_when="sname!=''"),Item('record')),
                 HGroup(Item('saveall',show_label=False, enabled_when="sname!=''"),Item('refermat',label="Ref. material")),
@@ -150,6 +150,8 @@ class Experiment(HasTraits):
             print("saved %i spectra"%len(olist))
         else:
             odata=array([self.instr.pixtable,self.instr.last]).T
+        #todo check for existing filename
+        #incremental naming
         savetxt(self.sname,odata,fmt="%8.5f")
         print(self.sname+" saved "+str(odata.shape))
 
@@ -209,14 +211,13 @@ class Experiment(HasTraits):
         if rc.saturate>0:
             for i in range(len(self.instr.flat)):
                 if any(self.instr.flat[i]>=rc.saturate):
-                    print("channel %i saturated"%i)
-        if hasattr(self.instr,"setflat"):
+                    self.display("channel %i saturated"%i)
+        if self.combine and hasattr(self.instr,"setflat"):
             self.instr.setflat(perc=rc.flat_above_quantile,fresh=False)
             self.display("reference table calculated")
             if iterable(self.instr.ysel):
                 self.display("channels :"+' '.join(["[%i]"%(sum(a) if iterable(a) else 0) for a in self.instr.ysel]))
                 self.display("weights :"+' '.join(["[%.2f / %i]"%(a.sum(),sum(a.sum(0)>0)) for a in self.instr.transtable if iterable(a)]))
-
         else: self.display("reference stored")
         self.paren.status_string="calibration finished"
         if not self.combine:
@@ -233,12 +234,12 @@ class Scan(HasTraits):
 
     Xpts = Int(10, label="X points", desc="fast axis/radial")
     Ypts = Int(10, label="Y points", desc="slow axis/azimuth")
-    Xstep = Float(rc.cart_step, label="X step", desc="instrumental steps")
-    Ystep = Float(rc.cart_step, label="Y step", desc="instrumental steps")
+    Xstep = Float(rc.cart_step, label="X step", desc="instrumental steps [mm]")
+    Ystep = Float(rc.cart_step, label="Y step", desc="instrumental steps [mm]")
     centerstart = Bool(True, label="start at center")
-    retlast = Bool(False, label="return to origin")
+    callast = Bool(False, label="reference at last", desc="to measure reference when the scan is finished")
     zigzag = Bool(True, label="scan in both directions")
-    radius = Float(50, label="wafer radius", desc="in mm")
+    radius = Float(50, label="wafer radius", desc="in [mm]")
     design = Button("Plan")
     dump = Button("Show")
     pclear = Button("Clear")
@@ -267,7 +268,7 @@ class Scan(HasTraits):
                 #HGroup(Item('Xstep'),Item('Ystep')),
                 HGroup(Item('radius', enabled_when="centerstart"),Item('centstr',style='readonly'),
                     Item('gocenter',show_label=False),Item('setcenter',show_label=False),enabled_when="ready"),
-                HGroup(Item('centerstart'),Item('retlast'),Item('zigzag'),Item('design',show_label=False),Item('dump',show_label=False),Item('pclear',show_label=False)),
+                HGroup(Item('centerstart'),Item('callast'),Item('zigzag'),Item('design',show_label=False),Item('dump',show_label=False),Item('pclear',show_label=False)),
                 HGroup(Item('up',show_label=False),Item('down',show_label=False),
                     Item('left',show_label=False),Item('right',show_label=False),enabled_when="ready"),
                 HGroup(Item('npoints',style='readonly'),Item('shome',show_label=False),Item('srefer',show_label=False),
@@ -319,8 +320,8 @@ class Scan(HasTraits):
         sel*=self.program[0]<rc.xy_size[0]
         sel*=self.program[1]<rc.xy_size[1]
         self.program=list(self.program[:,sel].T)
-        if self.retlast:
-            self.program.append([int(a) for a in self.actpos])
+        if self.cal_last:
+            self.program.append([int(a) for a in rc.refer_pos])
         self.npoints=len(self.program)
         if 'plan' in self.exelist: #vykreslit
             self.exelist['plan'].experiment.display("%i points out of accessible area"%(len(sel)-sum(sel)))
@@ -647,7 +648,7 @@ class Spectrac(HasTraits):
         self.instr.samp=None
         self.exper.display("setup ok [%i pixels] ..."%len(self.pixels))
         self.norm=(1,1,1)
-        self.paren.status_string="now calibrate [Experiment/Reference+Dark]"
+        self.paren.status_string="now calibrate [Experiment/Dark + Reference]"
         self.chanlist=[('%.2f-%.2f eV'%(c.min(),c.max())) for c in self.instr.chanene]
         self.ready=True
         #for c in self.chanlist:
@@ -683,6 +684,7 @@ class Spectrac(HasTraits):
             if self.instr!=None: 
                 self.instr.pixtable=self.instr.chanene[isel]
                 self.pixels=self.instr.pixtable.copy()
+                self.exper.display("chanel %i selected [%i pixels]"%(isel,len(self.pixels)))
         #self._norm_changed()
 
     def _equalize_fired(self):
@@ -1048,7 +1050,8 @@ class ControlPanel(HasTraits):
                 pin=self.spectrac.instr
                 self.spect_last=[]
                 ipck=arange(len(pin.chanene))[array(pin.intfact)>0]
-                for i in range(len(spect)):
+                ibnd=min(len(ipck),len(spect))
+                for i in range(ibnd):
                     dx,dy=pin.chanene[ipck[i]],spect[i]
                     if pin.ysel!=None:
                         dx,dy=dx[pin.ysel[i]],dy[pin.ysel[i]]
@@ -1059,7 +1062,8 @@ class ControlPanel(HasTraits):
                 self.spect_last.set_ydata(spect)
             else:
                 from numpy import iterable
-                if rc.debug>1: print("updating %i graphs"%len(spect))
+                nbnd=sum(array(pin.intfact)>0)
+                if rc.debug>1: print("updating %i graphs"%nbnd)
                 pin=self.spectrac.instr
                 for i in range(len(spect)):
                     #if not iterable(pin.ysel[i]): continue  
@@ -1185,23 +1189,6 @@ tabbedview = View(HSplit(Group(Group(
                 title='Spectrac NG',
                 key_bindings = my_bindings,
                 buttons=NoButtons)
-
-
-#--------------------extra stuff-----------------
-def fm_init(self):
-    import pyfirmata as fm
-    self.board = pyfirmata.Arduino(self.port)
-
-    #do we need this? probably only for inputs
-    it = pyfirmata.util.Iterator(self.board)
-    it.start()
-
-    self.board.digital[int(self.pin)].write(0)
-
-    value=float(self.board.analog[int(self.pin2)].read())
-
-    digital_0 = self.board.get_pin('d:11:p') #pwm
-    digital_0.write(value) #between 0 and 1
 
 
 import sys
