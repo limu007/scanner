@@ -212,7 +212,7 @@ class Experiment(HasTraits):
             for i in range(len(self.instr.flat)):
                 if any(self.instr.flat[i]>=rc.saturate):
                     self.display("channel %i saturated"%i)
-        if self.combine and hasattr(self.instr,"setflat"):
+        if self.combine and hasattr(self.instr,"setflat") and self.paren.spectrac.chansel<0:
             self.instr.setflat(perc=rc.flat_above_quantile,fresh=False)
             self.display("reference table calculated")
             if iterable(self.instr.ysel):
@@ -587,6 +587,7 @@ class Spectrac(HasTraits):
     nonlincorr = Bool(True, label="Nonlin. correction")
     ready=Bool(False)
     chanmatch = Button("Match")
+    chansel = -1
     refer_x = Int(rc.refer_pos[0])
     refer_y = Int(rc.refer_pos[1])
     #norm = Array
@@ -677,9 +678,11 @@ class Spectrac(HasTraits):
         from numpy import ones
         if self.singlechan=='all channels': 
             self.norm=tuple(list(ones(len(self.norm))))
+            self.chansel=-1
         else:
             isel=self.chanlist.index(self.singlechan)
             if isel<0: isel=len(self.norm)-1
+            self.chansel=isel
             self.norm=tuple([1. if i==isel else 0 for i in range(len(self.norm))])
             if self.instr!=None: 
                 self.instr.pixtable=self.instr.chanene[isel]
@@ -1008,8 +1011,8 @@ class ControlPanel(HasTraits):
             self.status_string="Running"
             self.acquisition_thread.start()
 
-    def adjust_image(self,margin=0):
-        from numpy import iterable
+    def adjust_image(self,margin=0.02,percent=99):
+        from numpy import iterable,percentile
         if self.spect_last!=None:
             if iterable(self.spect_last):
                 glist=self.spect_last
@@ -1024,8 +1027,13 @@ class ControlPanel(HasTraits):
                 sel=(xval>=rang[0])*(xval<=rang[1])
                 if sum(sel)<3: continue
                 yval=glist[i].get_ydata()[sel]
-                if ymin>yval.min(): ymin=yval.min()
-                if ymax<yval.max(): ymax=yval.max()
+                if percent>0 and percent<100:
+                    ylow=percentile(yval,100-percent)
+                    yhig=percentile(yval,percent)
+                else:
+                    ylow,yhig=yval.min(),yval.max()
+                if ymin>ylow: ymin=ylow
+                if ymax<yhig: ymax=yhig
             if margin>0:
                 ydis=ymax-ymin
                 ymin,ymax=ymin-ydis*margin,ymax+ydis*margin
@@ -1061,10 +1069,10 @@ class ControlPanel(HasTraits):
             if type(spect)!=list and len(spect.shape)==1:#self.experiment.combine:
                 self.spect_last.set_ydata(spect)
             else:
-                from numpy import iterable
+                from numpy import iterable,array
+                pin=self.spectrac.instr
                 nbnd=sum(array(pin.intfact)>0)
                 if rc.debug>1: print("updating %i graphs"%nbnd)
-                pin=self.spectrac.instr
                 for i in range(len(spect)):
                     #if not iterable(pin.ysel[i]): continue  
                     if self.spectrac.norm[i]>0: #instr.intfact
