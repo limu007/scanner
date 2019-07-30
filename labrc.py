@@ -30,7 +30,7 @@ spectr_nb_trials=3
 #----------------------------
 polar_stage=False
 
-xy_cent=[95,95]
+xy_cent=[120,75]
 refer_pos=[5,80]
 xy_size=[200,170]
 scan_axes_order=0 # for rot. stage 0= radial first, 1=rotate first

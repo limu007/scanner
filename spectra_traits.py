@@ -159,8 +159,9 @@ class Experiment(HasTraits):
         from numpy import concatenate,array,savetxt
         self.display("stack saved ...")
         if self.combine: clist=[0]
-        else: clist=range(1,len(self.instr.chanval)+1)
-        for cn in clist:
+        else: 
+            clist=[i+1 for i in range(len(self.instr.chanval)) if self.instr.intfact[i]>0]
+        for cn in clist: #looping through channel numbers
             if cn>0: speclst=[concatenate([[0,0],self.instr.chanene[cn-1]])]
             else: speclst=[concatenate([[0,0],self.instr.pixtable])]
             for k in self.stack.keys():
@@ -320,7 +321,7 @@ class Scan(HasTraits):
         sel*=self.program[0]<rc.xy_size[0]
         sel*=self.program[1]<rc.xy_size[1]
         self.program=list(self.program[:,sel].T)
-        if self.cal_last:
+        if self.callast:
             self.program.append([int(a) for a in rc.refer_pos])
         self.npoints=len(self.program)
         if 'plan' in self.exelist: #vykreslit
@@ -710,10 +711,11 @@ class Spectrac(HasTraits):
         zmax*=orig_norm #values used in previous acquisition
         self.norm=tuple(round(zmax,3))
         self.instr.intfact=list(self.norm)
-        combchan=array([a.sum(0)>0 for a in self.instr.transtable]).sum(0)
-        subpix=self.instr.pixtable[combchan>0]
-        if len(subpix)>0:
-            print("sum combined %i [%.2f - %.2f]"%(sum(combchan),subpix[0],subpix[-1]))
+        if hasattr(self.instr,'transtable') and iterable(self.instr.transtable):
+            combchan=array([a.sum(0)>0 for a in self.instr.transtable]).sum(0)
+            subpix=self.instr.pixtable[combchan>0]
+            if len(subpix)>0:
+                print("sum combined %i [%.2f - %.2f]"%(sum(combchan),subpix[0],subpix[-1]))
     #def _acquire_fired(self):
         #self.measure()
     #    self.config.display("arrived")
