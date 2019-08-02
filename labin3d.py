@@ -60,7 +60,7 @@ class specscope3d(specscope):
             
             prof=[]
             self.setup(prange=[200,400],integ=10,aver=10)
-            while (zpos>self.gzmin) && (zpos<self.gzmax):
+            while (zpos>self.gzmin) and (zpos<self.gzmax):
                 self.awrite("G1 Z%.1f"%zpos)
                 self.measure()
                 prof.append([zpos,self.last.sum()])

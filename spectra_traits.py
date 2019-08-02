@@ -259,6 +259,8 @@ class Scan(HasTraits):
     down = Button("Down")
     left = Button("Left")
     right = Button("Right")
+    near = Button("Near")
+    far = Button("Far")
     shome = Button("Reset axis")
     gocenter = Button("Go center")
     srefer = Button("Calib sample")
@@ -270,8 +272,8 @@ class Scan(HasTraits):
                 HGroup(Item('radius', enabled_when="centerstart"),Item('centstr',style='readonly'),
                     Item('gocenter',show_label=False),Item('setcenter',show_label=False),enabled_when="ready"),
                 HGroup(Item('centerstart'),Item('callast'),Item('zigzag'),Item('design',show_label=False),Item('dump',show_label=False),Item('pclear',show_label=False)),
-                HGroup(Item('up',show_label=False),Item('down',show_label=False),
-                    Item('left',show_label=False),Item('right',show_label=False),enabled_when="ready"),
+                HGroup(Item('up',show_label=False),Item('down',show_label=False),Item('left',show_label=False),Item('right',show_label=False),
+                    Item('near',show_label=False),Item('far',show_label=False),enabled_when="ready"),
                 HGroup(Item('npoints',style='readonly'),Item('shome',show_label=False),Item('srefer',show_label=False),
                      Item('getpos',show_label=False),Item('cpos'),Item('gopos',show_label=False),enabled_when="ready"),
                     #Item('cmeasure',show_label=False)
@@ -281,6 +283,7 @@ class Scan(HasTraits):
             )
     program = []
     actpos = List(Float,[0,0])
+    zpos = 0
     count = [0,0]
     exelist = {}
     since_calib=0
@@ -429,6 +432,17 @@ class Scan(HasTraits):
         self.disp_pos()
         #if self.instr: self.instr.rate(1,self.Xstep)
         #self.actpos[0]+=self.Xstep
+
+    def _near_fired(self):
+        if self.instr: 
+            self.zpos-=rc.zaxis_step
+            if self.zpos<0: self.zpos=0
+            self.instr.awrite("G1 Z%.1f"%self.zpos)
+
+    def _far_fired(self):
+        if self.instr: 
+            self.zpos+=rc.zaxis_step
+            self.instr.awrite("G1 Z%.1f"%self.zpos)
 
     def _ptskip_fired(self):
         if len(self.program)==0: return
@@ -591,6 +605,9 @@ class Spectrac(HasTraits):
     chansel = -1
     refer_x = Int(rc.refer_pos[0])
     refer_y = Int(rc.refer_pos[1])
+    cooler=Bool(False)
+    debug=Bool(False)
+    relative=Bool(rc.relative,label="Relative value")
     #norm = Array
     view = View(VGroup(
                 Item('erange', editor=BoundsEditor(low_name = 'elow', high_name = 'ehigh')),
@@ -604,6 +621,7 @@ class Spectrac(HasTraits):
                     Item('chanshow',width=5,show_label=False),Item('chanmatch')),#,enabled_when="instr.flat!=None")),
                 Item('calib',width=5,show_label=False, enabled_when='instr.samp!=None'),
                 HSplit(Item('refer_x'),Item('refer_y'),),
+                HSplit(Item('debug'),Item('relative'),),
                 HSplit(Item('port'),Item('setmeup',show_label=False)),
                 springy=True),
                 resizable=True,
@@ -675,6 +693,13 @@ class Spectrac(HasTraits):
     def _norm_changed(self):
         if self.instr!=None: self.instr.intfact=list(self.norm)
  
+    def _debug_changed(self):
+        if self.instr!=None: 
+            labin.loud=1 if self.debug else 0
+ 
+    def _relative_changed(self):
+        rc.relative=self.relative
+ 
     def _singlechan_changed(self):
         from numpy import ones
         if self.singlechan=='all channels': 
@@ -742,15 +767,15 @@ class Spectrac(HasTraits):
         if experiment.combine:
             if experiment.median>1:
                 from numpy import median
-                allspect=[self.instr.result() for i in range(experiment.median)]
+                allspect=[self.instr.result(div_flat=rc.relative) for i in range(experiment.median)]
                 spect=median(allspect,0)
             else:
-                spect=self.instr.result()
+                spect=self.instr.result(div_flat=rc.relative)
             if not(hasattr(spect,"shape")): return None
             if len(spect.shape)>1:
                 return spect.sum(axis=0)
         else:
-            spect=self.instr.result(maxit=-1,smooth=experiment.smooth)
+            spect=self.instr.result(div_flat=rc.relative,maxit=-1,smooth=experiment.smooth)
         # smooth should be called internally as result(smooth=True)
         if (experiment!=None and experiment.combine and experiment.smooth>20):
             from numpy import hamming,convolve
@@ -770,7 +795,7 @@ class Spectrac(HasTraits):
     def get_match(self):
         perc=rc.flat_above_quantile
         ou,ol=labin.gettrans(self.instr.pixtable,self.instr.chanene,self.instr.flat,skiplowest=perc,rep=-1)
-        data=self.instr.result(maxit=-2) # reuse last measurement
+        data=self.instr.result(div_flat=rc.relative,maxit=-2) # reuse last measurement
         #WRONG: last data in chanval are not flat corrected
         #zval=[self.instr.chanval[i][ol[i]].dot(ou[i]) for i in range(len(ou))]
         zval=[data[i][ol[i]].dot(ou[i]) for i in range(len(ou))]
@@ -1040,7 +1065,7 @@ class ControlPanel(HasTraits):
                 ydis=ymax-ymin
                 ymin,ymax=ymin-ydis*margin,ymax+ydis*margin
             if ymin<rc.graph_min: ymin=rc.graph_min
-            if ymax>rc.graph_max: ymax=rc.graph_max
+            if rc.relative and (ymax>rc.graph_max): ymax=rc.graph_max
             self.figure.axes[0].set_ylim(ymin,ymax)
             self.figure.canvas.draw()
 
@@ -1077,6 +1102,7 @@ class ControlPanel(HasTraits):
                 if rc.debug>1: print("updating %i graphs"%nbnd)
                 for i in range(len(spect)):
                     #if not iterable(pin.ysel[i]): continue  
+                    if len(self.spect_last)<=i: break
                     if self.spectrac.norm[i]>0: #instr.intfact
                         if pin.ysel!=None:
                             self.spect_last[i].set_ydata(spect[i][pin.ysel[i]])

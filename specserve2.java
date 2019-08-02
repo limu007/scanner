@@ -107,12 +107,15 @@ public class specserve2 implements Provider<Source> {
     }
 
 	public String exposemul (int []intime, int aver) {
-		String rep="";
+    String rep="";
+    int j=0;
 		for (int i=0; i<intime.length; i++) {
 			if (intime[i]>0) {
-				rep=rep+expose(intime[i],i,aver);
+        rep=rep+expose(intime[i],i,aver);
+        j+=1;
 			}
-		}
+    }
+    rep=rep+String.format("<p>multichanel %d</p>",j);
 		return rep;
   }
 
@@ -301,22 +304,28 @@ public class specserve2 implements Provider<Source> {
                chsel=input.get(key2);
           }
 		key1="exp0";
-		if (chsel<0 && input.containsKey(key1)) {//multichannel measurement
-			int[] inmult;
+    if (chsel<0 && input.containsKey(key1)) {//multichannel measurement
+      int[] inmult;
 			inmult=new int[10];
-			int i;
+      int i;
+      int j=0;
 			for (i=0;i<10;i+=1) {
+        inmult[i]=0;
 				//key1=String.format("exp%i",i);
 				key1="exp"+Integer.toString(i);
 				if (input.containsKey(key1)) {
-						inmult[i]=input.get(key1);
+            inmult[i]=input.get(key1);
+            j+=1;
 				} else {
 					//inmult[i]=0;
 					break;
 				}
 			}
-			if (i>0)
-				reply = new StreamSource(new StringReader(rep + exposemul(Arrays.copyOfRange(inmult,0,i),aver) + "</p>"));
+			//if (j>0) {
+        rep="<p>Hello multichannels!";
+        reply = new StreamSource(new StringReader(rep + exposemul(Arrays.copyOfRange(inmult,0,i),aver) + "</p>"));
+        return reply;
+      //}
 		}
     if (nstep>1) {
         System.out.printf("# scanning "+nstep+" pts \n");

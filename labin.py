@@ -1138,7 +1138,7 @@ class webocean(specscope):
     
     def start(self,path,incr=0):
         self.path=path
-        comm='java -cp ".;'+rc.java_ooijar+'"  '
+        comm=rc.java_exec+' -cp ".;'+rc.java_ooijar+'"  '
         portnum=self.path[self.path.rfind(":")+1:]
         portnum=portnum[:portnum.find('/')]
         if incr!=0:
@@ -1261,10 +1261,19 @@ class webocean(specscope):
         
     def makequery(self,chan=-1):
         if chan<0: chan=self.schan
+        nonchan=0
         if len(self.intfact)>0:
-            query=self.path.replace("exp=","&".join(["exp%i=%i"%(i,int(self.intfact[i]*self.intime)) for i in range(len(self.intfact))]))
-            query+="&chan=%i"%chan
-        else:
+            nonchan=sum([s>0 for s in self.intfact])
+            if nonchan>1:
+                query=self.path.replace("exp=","&".join(["exp%i=%i"%(i,int(self.intfact[i]*self.intime)) for i in range(len(self.intfact))]))
+                query+="&chan=%i"%chan
+            else:
+                for i in range(len(self.intfact)):
+                    chan=i
+                    if self.intfact[i]>0:
+                        self.intime=self.intfact[i]*self.intime
+                        break
+        if nonchan<2:
             query=self.path+"%i&chan=%i"%(self.intime,chan)
         query+="&corr=%i"%(2*self.darkcorr+self.nonlincorr)
         if rc.use_shut>0: query+="&shut=2"  

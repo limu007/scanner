@@ -7,6 +7,7 @@ intime=25
 use_dyndark=0
 soft_smooth=0
 use_shut=1
+relative=False
 
 spec_mode='transmissivity'#'reflectivity'
 spec_unit='eV'
@@ -105,6 +106,7 @@ dyndark_forget=50 #percentage for dynamic dark
 
 #java_runpath="C:/Users/optik/Code/Ocean/example/java/Simple"
 #java_runpath="C:/Users/optik/Code/Ocean/scanner"
+java_exec="C:/Program Files/Java/jre1.8.0_221/bin/java.exe"
 java_ooipath="C:/Users/optik/Code/Ocean/OmniDriver/OOI_HOME/"
 java_ooipath="C:/Program Files/Ocean Optics/OmniDriver/OOI_HOME/"
 java_ooijar=java_ooipath+"OmniDriver.jar"
@@ -187,3 +189,4 @@ graph_max=5.
 vert_exten=0.2
 
 save_period=10
+zaxis_step=3
