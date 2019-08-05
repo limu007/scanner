@@ -171,7 +171,7 @@ class Experiment(HasTraits):
                 except:
                     continue
                 #poslst.append([ix,iy])
-                if cn>0:
+                if cn>0 and len(self.stack[k].shape)>1:
                     speclst.append(concatenate([[ix,iy],self.stack[k][cn-1]]))
                 else:
                     speclst.append(concatenate([[ix,iy],self.stack[k]]))
@@ -283,7 +283,7 @@ class Scan(HasTraits):
             )
     program = []
     actpos = List(Float,[0,0])
-    zpos = 0
+    zpos = 0.
     count = [0,0]
     exelist = {}
     since_calib=0
@@ -767,15 +767,27 @@ class Spectrac(HasTraits):
         if experiment.combine:
             if experiment.median>1:
                 from numpy import median
-                allspect=[self.instr.result(div_flat=rc.relative) for i in range(experiment.median)]
+                allspect=[]
+                for i in range(experiment.median):
+                    allspect.append(self.instr.result(div_flat=rc.relative))
                 spect=median(allspect,0)
+                self.paren.display("Median")
             else:
                 spect=self.instr.result(div_flat=rc.relative)
             if not(hasattr(spect,"shape")): return None
             if len(spect.shape)>1:
                 return spect.sum(axis=0)
         else:
-            spect=self.instr.result(div_flat=rc.relative,maxit=-1,smooth=experiment.smooth)
+            if experiment.median>1:
+                from numpy import median
+                allspect=[]
+                for i in range(experiment.median):
+                    allspect.append(self.instr.result(div_flat=rc.relative))
+                    experiment.display("Collecting %i/%i"%(i+1,experiment.median))
+                spect=median(allspect,0)
+                #self.paren.display("Median")
+            else:
+                spect=self.instr.result(div_flat=rc.relative,maxit=-1,smooth=experiment.smooth)
         # smooth should be called internally as result(smooth=True)
         if (experiment!=None and experiment.combine and experiment.smooth>20):
             from numpy import hamming,convolve
@@ -1231,6 +1243,9 @@ import sys
 if __name__ == '__main__':
     aw=MainWindow()
     #if "--init" in sys.argv: rc.auto_init=True
+    for ar in sys.argv:
+        if v.find("chan")>0:
+            rc.chan_sel=int(v[v.find('=')+1:])
     aw.configure_traits(view=tabbedview)
     message(" press Setup first ", title = 'User request')
         

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 debug=2
 
-smoothing=10
+smoothing=7
 mean=20
 intime=25
 use_dyndark=0
@@ -189,4 +189,4 @@ graph_max=5.
 vert_exten=0.2
 
 save_period=10
-zaxis_step=3
+zaxis_step=0.5
