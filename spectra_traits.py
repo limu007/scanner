@@ -847,6 +847,7 @@ class Analyse(HasTraits):
         xdat=self.instr.pixtable
         sel=(xdat>=self.elow)*(xdat<=self.ehigh)
         ydat=self.instr.last
+        if not iterable(ydat) or len(ydat)!=len(sel): return 0
         return self.func(xdat[sel],ydat[sel])
 
     def _reset_fired(self):
