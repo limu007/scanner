@@ -171,7 +171,7 @@ class Experiment(HasTraits):
                 except:
                     continue
                 #poslst.append([ix,iy])
-                if cn>0 and len(self.stack[k].shape)>1:
+                if cn>0 and (type(self.stack[k])==list or len(self.stack[k].shape)>1):
                     speclst.append(concatenate([[ix,iy],self.stack[k][cn-1]]))
                 else:
                     speclst.append(concatenate([[ix,iy],self.stack[k]]))
