@@ -617,7 +617,7 @@ class ocean(specscope):
             twe=self.device.getFeatureControllerThermoElectric(0)
             twe.setDetectorSetPointCelsius(rc.cool_temp)
 
-    def measure(self):
+    def measure(self,**kwargs):
         from numpy import array
         spect = array(self.device.getSpectrum(0))
         return list(spect[:self.dsize])
@@ -678,7 +678,7 @@ class oceanjaz(ocean):
             iprev=i
         self.pixtable=unitconv(1,unit,array(list(gchan)))
 
-    def measure(self):
+    def measure(self,**kwargs):
         data=[]
         from numpy import array
         for i in self.chord:
@@ -771,7 +771,7 @@ class avantes(specscope):
         self.measure()
         return inum.value
 
-    def measure(self,npix=None,winhand=0,nmeas=1,prep_task=None):
+    def measure(self,npix=None,winhand=0,nmeas=1,prep_task=None,**kwargs):
         from time import sleep
         if prep_task!=None: eval(prep_task)
         if winhand<0 and hasattr(self,"parent"): winhand=self.parent
@@ -1354,7 +1354,7 @@ class uniocean(webocean):
             if sum(self.chanene[i]<prange[1])<minpix: self.intfact[i]=0
         self.config.m_NrAverages=int(aver)
 
-    def measure(self):
+    def measure(self,**kwargs):
         #self.ysel=None
         from numpy import iterable,sum,array
         tree=self.getresp(self.makequery())
