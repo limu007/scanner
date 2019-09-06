@@ -134,19 +134,19 @@ class Band():
             if len(self.samp.thick)>0:
                 thick=self.samp.get_thick()#np.median(list(self.samp.thick.values()))
             else: return
-        modval=self.model([thick,1,0])
+        modval=self.model([thick,1,0],renow=False)
         osel=self.sel*(modval>minval)
         yval=self.absol()
         osel*=yval>minval
         if sum(osel)<3:
             print("too few points")
-            osel=self.sel
+            osel=self.sel.copy()
 
-        #robust init
+        #robust init (outlier lookup)
         from scipy import ndimage as nd
         mmin=modval[osel].min()
         mstep=(modval[osel].max()-mmin)/ngrp
-        modlab=((modval[osel]-mmin)/mstep).astype(int)
+        modlab=((modval[osel]-mmin)/mstep).astype(int) #group labels
         meds=nd.median(yval[osel],modlab,range(max(modlab)-1))
         if loud>1:
             print(meds)
@@ -159,6 +159,7 @@ class Band():
         lim=np.percentile(dif,90)
         isel=np.r_[:len(osel)][osel][dif>lim] #indices where residual is too big
         osel[isel]=False
+
         res=np.polyfit(modval[osel],yval[osel],1)
         if res[0]<0:
             #print("neg.scale - rejected")
@@ -284,7 +285,7 @@ class Sample():
     lay=None
     wafer=None
     pos=[]
-    inval_thick=[]
+    inval_thick=set()
 
     def __init__(self,fname,laystruct="SiO2/Si",delim=None,maxband=0,data=None,headerow=0,bord=10):
         self.bands=[]
@@ -630,14 +631,15 @@ class Wafer():
                     b.fit(thguess,save="b%i"%(i+1))
                 i+=1
     
-    def mark_empty(self,mark="proc",perc=10,min_cnt=2):
-        fun2 = lambda sm:np.percentile(sm.bands[1].iy,100-perc)-np.percentile(sm.bands[1].iy,perc)
-        dat2=np.array([fun2(sm) for sm in self.samps])
+    def mark_empty(self,mark="proc",perc=10,min_cnt=2,iband=0,seplev=None):
+        if seplev==None:
+            fun2 = lambda sm:np.percentile(sm.bands[1].iy,100-perc)-np.percentile(sm.bands[1].iy,perc)
+            dat2=np.array([fun2(sm) for sm in self.samps])
 
-        prof=np.histogram(dat2,20);
-        seplev=np.median(prof[1][1:][prof[0]<min_cnt])
+            prof=np.histogram(dat2,20);
+            seplev=np.median(prof[1][1:][prof[0]<min_cnt])
         fun1 = lambda bd:np.percentile(bd.iy,100-perc)-np.percentile(bd.iy,perc)>seplev
-        return self.select_fun(fun1,mark=mark)
+        return self.select_fun(fun1,mark=mark,iband=iband)
 
     def dump(self,fname):
         ofile=open(fname,"w")
