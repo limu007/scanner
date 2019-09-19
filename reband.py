@@ -214,6 +214,9 @@ class Band():
         self.mid=uarray(zlst)
 
     def model(self,pars,renow=False):
+        '''returns reflectivity of a simple layer defined by samp.lay string
+        pars = [thickness, scale, offset]
+        '''
         from . import profit
         if len(pars)<3:
             if renow: self.renorm(minmodval,pars[0])
@@ -233,9 +236,9 @@ class Band():
                     epsi=[np.polyval(pars[3:][::-1],self.ix**2)**2,diel['ksi'](self.ix)]
                 elif 'cau' in diel:
                     epsi=[diel['cau'](self.ix),diel['ksi'](self.ix)]
-            else:
+            else: #thermic oxide
                 epsi=[diel['ksio2'](self.ix),diel['ksi'](self.ix)]
-        else:
+        else: #thermic oxide
             epsi=[diel['ksio2'](self.ix),diel['ksi'](self.ix)]
         return profit.plate(self.ix,epsi,[p[0]])*p[1]+p[2]
 
@@ -353,31 +356,43 @@ class Sample():
         vlist=[v for v in vlist if v>0]
         return np.median(vlist)
             
-    def get_qfit(self,thk=None,save=True):
+    def get_qfit(self,thk=None,save=True,refer=None):
         res=[]
         if thk==None: 
             thk=self.get_thick()
             if thk==None: return
-        for bd in self.bands:
-            if not hasattr(bd,'rat'):
+        for k,bd in enumerate(self.bands):
+            if refer!=None:
+                brefer=refer.bands[k]
+            else:
+                brefer=None
+            if not hasattr(bd,'rat') or bd.rat[1]==0:
                 bd.renorm(thick=thk)
-            bresid=bd.fit(None)
+            bresid=bd.fit(None,refer=brefer)
             res.append(bresid([thk]+list(bd.rat)))
             if save: bd.qfit=res[-1]
         return res
     
-    def renorm(self):
+    def renorm(self,thick=None):
         for bd in self.bands:
-            bd.renorm()
+            bd.renorm(thick=thick)
     
-    def fit(self,inval=None,save=None,refer=None):
+    def fit(self,inval=None,save=None,refer=None,prefit=False):
         from scipy import optimize as op
         if refer!=None:
             bresid=[self.bands[i].fit(None,refer=refer.bands[i]) for i in range(len(self.bands))]
         else:
             bresid=[self.bands[i].fit(None) for i in range(len(self.bands))]
         resid=lambda p:sum([bresid[i]([p[0],p[2*i+1],p[2*i+2]]) for i in range(len(self.bands))])
-        inarr=np.concatenate([[inval]]+[b.rat for b in self.bands])
+        if prefit:
+            if refer!=None:
+                bresult=[b.fit(inval,refer=refer.bands[i]) for i,b in enumerate(self.bands)]
+            else:
+                bresult=[b.fit(inval) for b in self.bands]
+            inthk=np.median([r[0] for r in bresult])
+            inarr=np.concatenate([[inthk]]+[r[1:3] for r in bresult])
+        else:
+            inarr=np.concatenate([[inval]]+[b.rat for b in self.bands])
         if inval==None: return inarr
         zpar=op.fmin(resid,inarr,full_output=False,disp=False)
         if np.isnan(zpar[0]):

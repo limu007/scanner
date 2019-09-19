@@ -102,16 +102,18 @@ def dbload(name='SiO2_gl',freq=None,connection="http"):
             import urllib.request as urllib2
         except ImportError:
             import urllib2 
+        import ssl
+        gcontext = ssl.SSLContext()
         if name==None:
-            query='http://physics.muni.cz/~munz/nanoCHARM/cgi-bin/base.cgi?show=mater'
-            aa=urllib2.urlopen(query)
+            query='https://physics.muni.cz/~munz/nanoCHARM/cgi-bin/base.cgi?show=mater'
+            aa=urllib2.urlopen(query,context=gcontext)
             return [a.strip() for a in aa.readlines()]
-        query='http://physics.muni.cz/~munz/nanoCHARM/cgi-bin/base.cgi?show=0&sample=%s&epsil=1'%name
+        query='https://physics.muni.cz/~munz/nanoCHARM/cgi-bin/base.cgi?show=0&sample=%s&epsil=1'%name
         if iterable(freq):
             imin=freq[0]
             imax=freq[-1]
             query+='&emin=%.3f&emax=%.3f'%(imin,imax)
-        aa=urllib2.urlopen(query)
+        aa=urllib2.urlopen(query,context=gcontext)
         if aa==None:
             print('cannot load data for '+name)
             return
