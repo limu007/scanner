@@ -331,10 +331,12 @@ class Sample():
             if self.data.shape[0]>self.data.shape[1]: self.data=self.data.T
         if maxband==0: maxband=len(self.data)//2
         if maxband<0:
+            if maxband==-1:
+                maxband=-len(self.data)+1 # columns = [energy val_pos_1 val_pos_2]
             for i in range(-1,maxband,-1):
                 self.bands.append(Band(self,i,bord=bord))
         else:
-            for i in range(0,maxband*2,2):
+            for i in range(0,maxband*2,2): #columns = [energy value energy_2 value_2 ...]
                 self.bands.append(Band(self,i,bord=bord))
         self.norm=lambda x:1
         if laystruct!=None: self.lay=laystruct
