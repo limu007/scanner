@@ -396,17 +396,22 @@ class Sample():
         for bd in self.bands:
             bd.renorm(thick=thick)
     
-    def fit(self,inval=None,save=None,refer=None,prefit=False,prefun=False):
+    def fit(self,inval=None,save=None,refer=None,prefit=False,prefun=False,fix_zero=False):
         '''
         prefun: returns model function, not final optimization result
+        fix_zero: only slope is fitted
         '''
         from scipy import optimize as op
+        from numpy import iterable
         if refer!=None:
             bresid=[self.bands[i].fit(None,refer=refer.bands[i],prefun=prefun) for i in range(len(self.bands))]
         else:
             bresid=[self.bands[i].fit(None,prefun=prefun) for i in range(len(self.bands))]
-        resid=lambda p:sum([bresid[i]([p[0],p[2*i+1],p[2*i+2]]) for i in range(len(self.bands))]) #sum of chi2 in all channels
-        if prefun:
+        if fix_zero:
+            resid=lambda p:sum([bresid[i]([p[0],p[i+1],0]) for i in range(len(self.bands))])
+        else:
+            resid=lambda p:sum([bresid[i]([p[0],p[2*i+1],p[2*i+2]]) for i in range(len(self.bands))]) #sum of chi2 in all channels
+        if prefun and inval==None:
             return resid
         if prefit: # fit indiviudal channels before combining all
             if refer!=None:
@@ -417,18 +422,27 @@ class Sample():
             inarr=np.concatenate([[inthk]]+[r[1:3] for r in bresult])
         else:
             inarr=np.concatenate([[inval]]+[b.rat for b in self.bands])
-
+        if fix_zero:
+            inarr=np.concatenate([inarr[:1],inarr[1::2]])
+            
         if inval==None: return inarr
         zpar=op.fmin(resid,inarr,full_output=False,disp=False)
         if np.isnan(zpar[0]):
             return zpar
         if save!=None:
                 self.thick[save]=zpar[0]
+                self.chi2[save]=resid(zpar)
         for i,b in enumerate(self.bands):
             p=zpar
-            b.qfit=bresid[i]([p[0],p[2*i+1],p[2*i+2]])
+            if fix_zero:
+                b.qfit=bresid[i]([p[0],p[i+1],0])
+            else:
+                b.qfit=bresid[i]([p[0],p[2*i+1],p[2*i+2]])
             if save!=None:
-                b.rat=[p[2*i+1],p[2*i+2]]
+                if fix_zero:
+                    b.rat[0]=p[i+1]
+                else:
+                    b.rat=[p[2*i+1],p[2*i+2]]
         return zpar
 
     def trans(self,ttable,tsel,lev=0.2,qspline=10.,pixval=None,reweig=True,ref=None):
@@ -488,6 +502,8 @@ class Sample():
     def get_name(self):
         return "pos_"+str(list(self.pos))[1:-1].replace(",","_").replace(" ","")
             
+    def todo(self,lab='both'):
+        return [s for s in self.nearest.values() if lab not in s.thick]
 
     def census(self,lab='first',outliers=20,valid=[]):
         from numpy import percentile
