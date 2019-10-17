@@ -10,6 +10,7 @@ indir="C:/Users/Optik/Documents/Data/Calib/"
 sinname="sin_nk_test.mat"#"sinx_cl2.mat"
 
 def transpose(self,nbext=0,pos=[]):
+    '''switching columns/files in data: channels vs. measurement points (Samples)'''
     if nbext==0: nbext=len(self.samps)
     gx=[sm.bands[0].ix for sm in self.samps]
     sm=self.samps[0]
@@ -134,7 +135,7 @@ class Band():
             if len(self.samp.thick)>0:
                 thick=self.samp.get_thick()#np.median(list(self.samp.thick.values()))
             else: return
-        modval=self.model([thick,1,0],renow=False)
+        modval=self.model([thick,1,0])
         osel=self.sel*(modval>minval)
         yval=self.absol()
         osel*=yval>minval
@@ -142,11 +143,11 @@ class Band():
             print("too few points")
             osel=self.sel.copy()
 
-        #robust init (outlier lookup)
+        #robust init
         from scipy import ndimage as nd
         mmin=modval[osel].min()
         mstep=(modval[osel].max()-mmin)/ngrp
-        modlab=((modval[osel]-mmin)/mstep).astype(int) #group labels
+        modlab=((modval[osel]-mmin)/mstep).astype(int)
         meds=nd.median(yval[osel],modlab,range(max(modlab)-1))
         if loud>1:
             print(meds)
@@ -159,7 +160,6 @@ class Band():
         lim=np.percentile(dif,90)
         isel=np.r_[:len(osel)][osel][dif>lim] #indices where residual is too big
         osel[isel]=False
-
         res=np.polyfit(modval[osel],yval[osel],1)
         if res[0]<0:
             #print("neg.scale - rejected")
@@ -213,9 +213,11 @@ class Band():
             zlst.append(sum(ok*ttable[:,j][xsel])/self.wei[j])
         self.mid=uarray(zlst)
 
-    def model(self,pars,renow=False):
-        '''returns reflectivity of a simple layer defined by samp.lay string
-        pars = [thickness, scale, offset]
+    def model(self,pars,renow=False,prefun=False):
+        '''currently supports single layer model
+           dielectric as SiN, SiO2 and cauchy models
+           substrate is Si
+           TODO: more variability!
         '''
         from . import profit
         if len(pars)<3:
@@ -227,19 +229,27 @@ class Band():
             if self.samp.lay.find('SiN')>=0:
                 if not 'ksin' in diel:
                     from scipy import interpolate as ip
-                    tsin=np.loadtxt(indir+sinname,unpack=True,skiprows=3)
+                    import os
+                    if os.path.exists(indir+sinname):
+                        tsin=np.loadtxt(indir+sinname,unpack=True,skiprows=3)
+                    else:
+                        print("cannot find SiN data: "+indir+sinname)
                     diel['ksin']=ip.interp1d(tsin[0],(tsin[1]+1j*tsin[2])**2)
                 epsi=[diel['ksin'](self.ix),diel['ksi'](self.ix)]
-            elif self.samp.lay.find('cau')>=0:
+            elif self.samp.lay.find('cau')>=0: #Caucjy profile
                 if len(pars)>3:
                     if not 'cau' in diel: diel['cau']=lambda x:np.polyval(pars[3:][::-1],x**2)**2
                     epsi=[np.polyval(pars[3:][::-1],self.ix**2)**2,diel['ksi'](self.ix)]
                 elif 'cau' in diel:
                     epsi=[diel['cau'](self.ix),diel['ksi'](self.ix)]
-            else: #thermic oxide
+            else:
                 epsi=[diel['ksio2'](self.ix),diel['ksi'](self.ix)]
-        else: #thermic oxide
+        else: #by default
             epsi=[diel['ksio2'](self.ix),diel['ksi'](self.ix)]
+        if prefun:
+            if hasattr(self,"rat") and len(pars)<2:
+                return lambda p:profit.plate(self.ix,epsi,[p[0]])*self.rat[0]+self.rat[1]
+            return lambda p:profit.plate(self.ix,epsi,[p[0]])*p[1]+p[2]
         return profit.plate(self.ix,epsi,[p[0]])*p[1]+p[2]
 
     def plot(self,amodel=False,match=True):
@@ -255,13 +265,26 @@ class Band():
             else:
                 pl.plot(self.ix[self.sel],self.model([thick])[self.sel])
 
-    def fit(self,inval=None,irat=[1.3,-0.15],save=None,refer=None):
+    def fit(self,inval=None,irat=[1.3,-0.15],save=None,refer=None,prefun=False):
+        '''
+        irat: expected values for renormalization
+        save: label for storing fit results (in self.sample)
+        '''
         from scipy import optimize as op
+        if prefun:
+            iabs=self.absol()[self.sel]
+            imod=self.model([0]+irat,prefun=True)
+            if refer!=None:
+                resid=lambda p:sum((iabs-imod(p)[self.sel])**2/refer.iy[self.sel]**2)
+            else:
+                resid=lambda p:sum((iabs-imod(p)[self.sel])**2)
+            return resid
         if refer!=None:
             resid=lambda p:sum((self.absol()[self.sel]-self.model(p)[self.sel])**2/refer.iy[self.sel]**2)
         else:
             resid=lambda p:sum((self.absol()[self.sel]-self.model(p)[self.sel])**2)
         if inval==None: return resid
+                    
         from numpy import iterable
         if iterable(inval):
             zpar=op.fmin(resid,[inval[0],irat[0],irat[1]]+list(inval[1:]),full_output=False,disp=False)
@@ -288,7 +311,7 @@ class Sample():
     lay=None
     wafer=None
     pos=[]
-    inval_thick=set()
+    inval_thick=[]
 
     def __init__(self,fname,laystruct="SiO2/Si",delim=None,maxband=0,data=None,headerow=0,bord=10):
         self.bands=[]
@@ -356,19 +379,15 @@ class Sample():
         vlist=[v for v in vlist if v>0]
         return np.median(vlist)
             
-    def get_qfit(self,thk=None,save=True,refer=None):
+    def get_qfit(self,thk=None,save=True):
         res=[]
         if thk==None: 
             thk=self.get_thick()
             if thk==None: return
-        for k,bd in enumerate(self.bands):
-            if refer!=None:
-                brefer=refer.bands[k]
-            else:
-                brefer=None
-            if not hasattr(bd,'rat') or bd.rat[1]==0:
+        for bd in self.bands:
+            if not hasattr(bd,'rat'):
                 bd.renorm(thick=thk)
-            bresid=bd.fit(None,refer=brefer)
+            bresid=bd.fit(None)
             res.append(bresid([thk]+list(bd.rat)))
             if save: bd.qfit=res[-1]
         return res
@@ -377,14 +396,19 @@ class Sample():
         for bd in self.bands:
             bd.renorm(thick=thick)
     
-    def fit(self,inval=None,save=None,refer=None,prefit=False):
+    def fit(self,inval=None,save=None,refer=None,prefit=False,prefun=False):
+        '''
+        prefun: returns model function, not final optimization result
+        '''
         from scipy import optimize as op
         if refer!=None:
-            bresid=[self.bands[i].fit(None,refer=refer.bands[i]) for i in range(len(self.bands))]
+            bresid=[self.bands[i].fit(None,refer=refer.bands[i],prefun=prefun) for i in range(len(self.bands))]
         else:
-            bresid=[self.bands[i].fit(None) for i in range(len(self.bands))]
-        resid=lambda p:sum([bresid[i]([p[0],p[2*i+1],p[2*i+2]]) for i in range(len(self.bands))])
-        if prefit:
+            bresid=[self.bands[i].fit(None,prefun=prefun) for i in range(len(self.bands))]
+        resid=lambda p:sum([bresid[i]([p[0],p[2*i+1],p[2*i+2]]) for i in range(len(self.bands))]) #sum of chi2 in all channels
+        if prefun:
+            return resid
+        if prefit: # fit indiviudal channels before combining all
             if refer!=None:
                 bresult=[b.fit(inval,refer=refer.bands[i]) for i,b in enumerate(self.bands)]
             else:
@@ -393,6 +417,7 @@ class Sample():
             inarr=np.concatenate([[inthk]]+[r[1:3] for r in bresult])
         else:
             inarr=np.concatenate([[inval]]+[b.rat for b in self.bands])
+
         if inval==None: return inarr
         zpar=op.fmin(resid,inarr,full_output=False,disp=False)
         if np.isnan(zpar[0]):
@@ -646,14 +671,20 @@ class Wafer():
                     b.fit(thguess,save="b%i"%(i+1))
                 i+=1
     
-    def mark_empty(self,mark="proc",perc=10,min_cnt=2,iband=0,seplev=None):
-        if seplev==None:
-            fun2 = lambda sm:np.percentile(sm.bands[1].iy,100-perc)-np.percentile(sm.bands[1].iy,perc)
-            dat2=np.array([fun2(sm) for sm in self.samps])
-
-            prof=np.histogram(dat2,20);
-            seplev=np.median(prof[1][1:][prof[0]<min_cnt])
-        fun1 = lambda bd:np.percentile(bd.iy,100-perc)-np.percentile(bd.iy,perc)>seplev
+    def mark_empty(self,mark="proc",perc=10,min_cnt=2,iband=0,rep=0,ndiv=20):
+        fun2 = lambda sm:np.percentile(sm.bands[iband].iy[sm.bands[iband].sel],100-perc)-np.percentile(sm.bands[iband].iy[sm.bands[iband].sel],perc)
+        dat2=np.array([fun2(sm) for sm in self.samps])
+        drange=[np.percentile(dat2,10),np.percentile(dat2,90)]
+        ddist=drange[1]-drange[0]
+        drange[0]-=ddist
+        drange[1]+=ddist
+        prof=np.histogram(dat2,np.r_[drange[0]:drange[1]:1j*ndiv])
+        if rep==1: return prof
+        qsel=prof[0]>min_cnt
+        zmin,zmax=np.r_[:len(qsel)][qsel][[0,-1]]
+        seplev=np.median(prof[1][zmin:zmax+1][prof[0][zmin:zmax+1]<min_cnt])
+        if rep>1: print(seplev)
+        fun1 = lambda bd:np.percentile(bd.iy[bd.sel],100-perc)-np.percentile(bd.iy[bd.sel],perc)>seplev
         return self.select_fun(fun1,mark=mark,iband=iband)
 
     def dump(self,fname):
