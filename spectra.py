@@ -455,10 +455,11 @@ def extrema(x,b=None,lbin=0,poly=0,ret_all=False,check_bins=True,msplit=False,re
     msplit:: split by the middle line
     extsel:: region around extrema fitted with quadrat. polyn.
     '''
-    if b!=None: ob=b.copy()
+    from numpy import iterable
+    if iterable(b): ob=b.copy()
     if lbin>1: #length of the bin
         nbin=len(x)//lbin
-        if b!=None and check_bins: #is binning correct
+        if iterable(b) and check_bins: #is binning correct
             if (b[::lbin].std()>b[::lbin].mean()):
                 print('binning not uniform: using spline interpolation')
                 if b[0]>b[-1]:dir=-1
@@ -470,10 +471,10 @@ def extrema(x,b=None,lbin=0,poly=0,ret_all=False,check_bins=True,msplit=False,re
                 nbin=0
         if nbin>0:
             x=x[:nbin*lbin].reshape(nbin,lbin).mean(1)
-            if b!=None:b=b[:nbin*lbin].reshape(nbin,lbin).mean(1)
+            if iterable(b):b=b[:nbin*lbin].reshape(nbin,lbin).mean(1)
             if loud>0: print('lbinning to %i bins'%len(x))
     else: lbin=1
-    if b!=None and b[0]>b[-1]:
+    if iterable(b) and b[0]>b[-1]:
         b=b[::-1]
         x=x[::-1]
     from numpy import where

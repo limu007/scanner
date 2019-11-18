@@ -3,6 +3,7 @@ import numpy as np
 refer=None
 diel={}
 minmodval=0.05
+min_norm,max_norm=0.5,1.7 #norm correction
 refthk=0.5#23.7 #oxide thickness on reference sample in [nm]
 rescale=1
 #indir="C:/Users/Admin/Documents/Lab/MOCVD/lpcvd-calib/"
@@ -136,6 +137,7 @@ class Band():
                 thick=self.samp.get_thick()#np.median(list(self.samp.thick.values()))
             else: return
         modval=self.model([thick,1,0])
+        modval[np.isnan(modval)]=0 # proc tu jsou vadne hodnoty?
         osel=self.sel*(modval>minval)
         yval=self.absol()
         osel*=yval>minval
@@ -147,8 +149,17 @@ class Band():
         from scipy import ndimage as nd
         mmin=modval[osel].min()
         mstep=(modval[osel].max()-mmin)/ngrp
+        if mstep<0.01:
+            ngrp=int((modval[osel].max()-mmin)/0.015)
+            if ngrp>2:
+                mstep=(modval[osel].max()-mmin)/ngrp
+        if mstep<0.01:
+            self.rat=[1,0.01]
+            return 
         modlab=((modval[osel]-mmin)/mstep).astype(int)
-        meds=nd.median(yval[osel],modlab,range(max(modlab)-1))
+        #meds=nd.median(yval[osel],modlab,range(max(modlab)-1))
+        #meds=nd.mean(yval[osel],modlab,range(max(modlab)-1))
+        meds=np.array([np.mean(yval[osel][modlab==i]) for i in range(max(modlab)-1)])
         if loud>1:
             print(meds)
             print(modlab.min(),modlab.max(),sum(modlab==modlab.max()))
@@ -158,10 +169,11 @@ class Band():
         res0=np.polyfit(vpos,meds,1)
         dif=abs(modval[osel]*res0[0]+res0[1]-yval[osel])
         lim=np.percentile(dif,90)
+        dif[np.isnan(dif)]=2*lim
         isel=np.r_[:len(osel)][osel][dif>lim] #indices where residual is too big
         osel[isel]=False
         res=np.polyfit(modval[osel],yval[osel],1)
-        if res[0]<0:
+        if (res[0]<min_norm) or (res[0]>max_norm):
             #print("neg.scale - rejected")
             res=[1,0]
         self.rat=res
