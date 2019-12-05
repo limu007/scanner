@@ -173,9 +173,11 @@ class Band():
         isel=np.r_[:len(osel)][osel][dif>lim] #indices where residual is too big
         osel[isel]=False
         res=np.polyfit(modval[osel],yval[osel],1)
-        if (res[0]<min_norm) or (res[0]>max_norm):
+        if (res[0]<min_norm):
+            res[0]=min_norm
+        if (res[0]>max_norm):
             #print("neg.scale - rejected")
-            res=[1,0]
+            res[0]=max_norm
         self.rat=res
 
     def trans(self,ttable,tsel,lev=0.2,qspline=10.,pixval=None):
@@ -230,6 +232,8 @@ class Band():
            dielectric as SiN, SiO2 and cauchy models
            substrate is Si
            TODO: more variability!
+           
+           prefun: returns reflectivity with precalculated dielectric functions
         '''
         from . import profit
         if len(pars)<3:
@@ -238,7 +242,8 @@ class Band():
             else: p=[pars,1,0]
         else:p=pars[:3]
         if self.samp.lay!=None:
-            if self.samp.lay.find('SiN')>=0:
+            tlay=self.samp.lay.split('/')[0]
+            if tlay=='SiN':#self.samp.lay.find('SiN')>=0:
                 if not 'ksin' in diel:
                     from scipy import interpolate as ip
                     import os
@@ -248,18 +253,20 @@ class Band():
                         print("cannot find SiN data: "+indir+sinname)
                     diel['ksin']=ip.interp1d(tsin[0],(tsin[1]+1j*tsin[2])**2)
                 epsi=[diel['ksin'](self.ix),diel['ksi'](self.ix)]
-            elif self.samp.lay.find('cau')>=0: #Caucjy profile
+            elif tlay=='cau': #Caucjy profile
                 if len(pars)>3:
                     if not 'cau' in diel: diel['cau']=lambda x:np.polyval(pars[3:][::-1],x**2)**2
                     epsi=[np.polyval(pars[3:][::-1],self.ix**2)**2,diel['ksi'](self.ix)]
                 elif 'cau' in diel:
                     epsi=[diel['cau'](self.ix),diel['ksi'](self.ix)]
-            else:
+            elif tlay in diel: #user defined dielectric function
+                epsi=[diel[tlay](self.ix),diel['ksi'](self.ix)]    
+            else:#expecting SiO2
                 epsi=[diel['ksio2'](self.ix),diel['ksi'](self.ix)]
         else: #by default
             epsi=[diel['ksio2'](self.ix),diel['ksi'](self.ix)]
         if prefun:
-            if hasattr(self,"rat") and len(pars)<2:
+            if hasattr(self,"rat") and len(pars)<2: #fixed renormalization
                 return lambda p:profit.plate(self.ix,epsi,[p[0]])*self.rat[0]+self.rat[1]
             return lambda p:profit.plate(self.ix,epsi,[p[0]])*p[1]+p[2]
         return profit.plate(self.ix,epsi,[p[0]])*p[1]+p[2]
@@ -272,18 +279,19 @@ class Band():
             pl.plot(self.ix[self.sel],self.absol()[self.sel])
         if amodel and len(self.samp.thick)>0:
             thick=self.samp.get_thick()
-            if match:
+            if match:## proc kdyz to umi spocitat model uvnitr? chceme model oprosteny od renormalizace..aby navazovaly sousedni intervaly(?)
                 pl.plot(self.ix[self.sel],(self.model([thick])[self.sel]-self.rat[1])/self.rat[0])
+                #pl.plot(self.ix[self.sel],self.model([thick,1,0])[self.sel])
             else:
                 pl.plot(self.ix[self.sel],self.model([thick])[self.sel])
 
-    def fit(self,inval=None,irat=[1.3,-0.15],save=None,refer=None,prefun=False):
+    def fit(self,inval=None,irat=[1.3,-0.15],save=None,refer=None,prefun=False,constr=None):
         '''
         irat: expected values for renormalization
         save: label for storing fit results (in self.sample)
         '''
         from scipy import optimize as op
-        if prefun:
+        if prefun: # save 
             iabs=self.absol()[self.sel]
             imod=self.model([0]+irat,prefun=True)
             if refer!=None:
@@ -299,9 +307,14 @@ class Band():
                     
         from numpy import iterable
         if iterable(inval):
-            zpar=op.fmin(resid,[inval[0],irat[0],irat[1]]+list(inval[1:]),full_output=False,disp=False)
+            initv=[inval[0],irat[0],irat[1]]+list(inval[1:])
         else:
-            zpar=op.fmin(resid,[inval,irat[0],irat[1]],full_output=False,disp=False)
+            initv=[inval,irat[0],irat[1]]
+        if iterable(constr):
+            res=op.minimize(resid, initv, method='SLSQP', bounds=constr)
+            zpar=res.x
+        else:
+            zpar=op.fmin(resid,initv,full_output=False,disp=False)
         self.qfit=resid(zpar)
         if save!=None:
             self.samp.thick[save]=zpar[0]
@@ -317,13 +330,12 @@ def overlaps(caltab):
     return list(istart),list(iend)
 
 class Sample():
-    #bands=[] #to je spatne - sdilena
     data=None
     fname=""
     lay=None
     wafer=None
     pos=[]
-    inval_thick=[]
+    inval_thick=set()#[]
 
     def __init__(self,fname,laystruct="SiO2/Si",delim=None,maxband=0,data=None,headerow=0,bord=10):
         self.bands=[]
@@ -410,7 +422,7 @@ class Sample():
         for bd in self.bands:
             bd.renorm(thick=thick)
     
-    def fit(self,inval=None,save=None,refer=None,prefit=False,prefun=False,fix_zero=False):
+    def fit(self,inval=None,save=None,refer=None,prefit=False,prefun=False,fix_zero=False,constr=None):
         '''
         prefun: returns model function, not final optimization result
         fix_zero: only slope is fitted
@@ -432,7 +444,7 @@ class Sample():
                 bresult=[b.fit(inval,refer=refer.bands[i]) for i,b in enumerate(self.bands)]
             else:
                 bresult=[b.fit(inval) for b in self.bands]
-            inthk=np.median([r[0] for r in bresult])
+            inthk=np.median([r[0] for r in bresult]) #thickness
             inarr=np.concatenate([[inthk]]+[r[1:3] for r in bresult])
         else:
             inarr=np.concatenate([[inval]]+[b.rat for b in self.bands])
@@ -440,7 +452,12 @@ class Sample():
             inarr=np.concatenate([inarr[:1],inarr[1::2]])
             
         if inval==None: return inarr
-        zpar=op.fmin(resid,inarr,full_output=False,disp=False)
+        # we need parameter constraints
+        if iterable(constr):
+            res=op.minimize(resid, inarr, method='SLSQP', bounds=constr)
+            zpar=res.x
+        else:
+            zpar=op.fmin(resid,inarr,full_output=False,disp=False)
         if np.isnan(zpar[0]):
             return zpar
         if save!=None:
@@ -520,6 +537,8 @@ class Sample():
         return [s for s in self.nearest.values() if lab not in s.thick]
 
     def census(self,lab='first',outliers=20,valid=[]):
+        '''colects data from (already analyzed) nearby samples
+        '''
         from numpy import percentile
         rvals=[sq.thick[lab] for sq in self.nearest.values() if hasattr(sq,"thick") and lab in sq.thick and sq.thick[lab]>0]
         if len(valid)>1:
