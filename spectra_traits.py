@@ -1,5 +1,9 @@
-from traits.api import *
-from traitsui.api import *
+#from traits.api import *
+from traitsui.api import View, Group, HGroup, HSplit, VGroup, VFold, NoButtons
+from traitsui.api import EnumEditor, TabularEditor, Menu, MenuBar, Item, UItem, Handler
+from traits.api import HasTraits, Int, Float, Bool, Str, Range, String, List, Tuple, Enum, File
+from traits.api import Event, Code, Button, Property, Instance
+
 from threading import Thread
 from time import sleep
 from traitsui.key_bindings import KeyBinding, KeyBindings
@@ -11,7 +15,7 @@ from traitsui.message import message
 #from mpl_figure_editor import MPLFigureEditor
 import matplotlib
 #from scipy import indices,rand
-from numpy import exp,sqrt,sum
+from numpy import exp,sqrt,sum, array, iterable
 global aw
 aw=None
 
@@ -536,7 +540,7 @@ class AcquisitionThread(Thread):
         """ Runs the acquisition loop. """
         self.display('Spectrac started')
         self.n_img = 0
-        from numpy import array,iterable
+        #from numpy import array,iterable
         while not self.wants_abort:
             self.n_img += 1
             if hasattr(self,"prepare"): self.prepare()
@@ -804,7 +808,7 @@ class Spectrac(HasTraits):
                 print("problem combining:no pict selected")
         return(spect)
 
-    def get_match(self):
+    def get_match(self, caltab):
         perc=rc.flat_above_quantile
         ou,ol=labin.gettrans(self.instr.pixtable,self.instr.chanene,self.instr.flat,skiplowest=perc,rep=-1)
         data=self.instr.result(div_flat=rc.relative,maxit=-2) # reuse last measurement
@@ -1109,7 +1113,7 @@ class ControlPanel(HasTraits):
             if type(spect)!=list and len(spect.shape)==1:#self.experiment.combine:
                 self.spect_last.set_ydata(spect)
             else:
-                from numpy import iterable,array
+                #from numpy import iterable,array
                 pin=self.spectrac.instr
                 nbnd=sum(array(pin.intfact)>0)
                 if rc.debug>1: print("updating %i graphs"%nbnd)
@@ -1244,7 +1248,7 @@ import sys
 if __name__ == '__main__':
     aw=MainWindow()
     #if "--init" in sys.argv: rc.auto_init=True
-    for ar in sys.argv:
+    for v in sys.argv:
         if v.find("chan")>0:
             rc.chan_sel=int(v[v.find('=')+1:])
     aw.configure_traits(view=tabbedview)

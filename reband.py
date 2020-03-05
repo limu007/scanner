@@ -125,7 +125,7 @@ class Band():
 
     def guess(self,dlist=None,rep=1):
         #dlist in nanometers
-        from scanner import profit
+        #from scanner import profit
         epsi=[diel['ksio2'](self.ix),diel['ksi'](self.ix)]
         if not(np.iterable(dlist)): dlist=np.arange(20,300,5)
         nor=lambda d:((self.absol())[self.sel]/self.model([d],renow=True)[self.sel]).std()
@@ -598,7 +598,7 @@ class Sample():
         if len(valid)>1:
             rvals=[t for t in rvals if t>=valid[0] and t<=valid[1]]
         if len(rvals)>2 and outliers>0:
-            zmin,zmax=np.percentile(rvals,outliers),np.percentile(rvals,100-outliers)
+            zmin,zmax=percentile(rvals,[outliers,100-outliers])
             zmin,zmax=zmin*1.5-zmax*0.5,zmax*1.5-zmin*0.5
             for i in range(len(rvals)-1,-1,-1):
                 if rvals[i]>zmax or rvals[i]<zmin:
@@ -632,7 +632,7 @@ class Sample():
         pl.xlabel(unit)
         pl.grid()
 
-posfun=lambda ix,iy:np.any([(edgpos==[ix,iy]).sum(1)==2])
+#posfun=lambda ix,iy:np.any([(edgepos==[ix,iy]).sum(1)==2])
 
 class Wafer():
 
@@ -815,7 +815,7 @@ class Wafer():
     def load(self,fname):
         import os
         if not os.path.exists(fname):
-            print("file %s not found"%s)
+            print("file %s not found"%fname)
             return
         j,k=0,0
         with open(fname) as ifile:
