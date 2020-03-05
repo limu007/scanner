@@ -69,6 +69,7 @@ class Experiment(HasTraits):
     shut = Bool(rc.use_shut,label="light shutter",desc="open shutter for measurement only")
     record = Bool(False,label="store next",desc="put in stack")
     combine = Bool(rc.chan_combine,label="combine multichannel")
+    savecols = Bool(True,label="spectra in columns")
     sname = File(label="Filename")
     refer = Button("Reference")
     darken = Button("Dark")
@@ -86,7 +87,7 @@ class Experiment(HasTraits):
                 HGroup(Item('shut'),Item('median',width=5),Item('combine'), Item('smooth',enabled_when="combine==False")),
                 HGroup(Item('darken',show_label=False, enabled_when="ready"),Item('refer',show_label=False, enabled_when="ready"),
                 Item('recalper',enabled_when="ready"),),
-                HGroup(Item('sname'),Item('saveme',show_label=False, enabled_when="sname!=''"),Item('record')),
+                HGroup(Item('sname'),Item('saveme',show_label=False, enabled_when="sname!=''"), Item('savecols'), Item('record')),
                 HGroup(Item('saveall',show_label=False, enabled_when="sname!=''"),Item('refermat',label="Ref. material")),
                 Item('errb'),#editor=CheckListEditor(values=reflist)
                 menubar=menubar,width=10)
@@ -147,13 +148,14 @@ class Experiment(HasTraits):
             for i in range(len(data)):
                 if hasattr(self,'intfact') and self.intfact[i]==0: continue
                 olist+=[self.instr.chanene[i],data[i]]
-            odata=array(olist)
+            odata=array(olist).T
         elif len(self.stack)>1:
             olist=self.stack.keys()
-            odata=array([self.instr.pixtable]+[self.stack[k] for k in olist]).T
+            odata=array([self.instr.pixtable]+[self.stack[k] for k in olist])
             print("saved %i spectra"%len(olist))
         else:
-            odata=array([self.instr.pixtable,self.instr.last]).T
+            odata=array([self.instr.pixtable,self.instr.last])
+        if not self.savecols: odata=odata.T
         #todo check for existing filename
         #incremental naming
         savetxt(self.sname,odata,fmt="%8.5f")
