@@ -11,7 +11,61 @@ has_bounds=True
 prefun=True
 import reband as rb
 
-def fitme(sm,lab="first",inlab=None):
+#preparation
+
+def load_calib(fname='calib2.txt',iord=6,lims=[],band=0,doplot=False):
+    cal1=np.loadtxt(fname)#,unpack=True)
+    if len(lims)==2: sel=(cal1[2*band]>=lims[0])*(cal1[2*band]<lims[1])
+    else: sel=cal1[2*band]>0
+    x=cal1[2*band][sel]
+    if doplot: pl.plot(x,cal1[2*band+1][sel])
+    idx=np.polyfit(x,cal1[2*band+1][sel],iord)
+    if doplot:
+        pl.plot(x,np.polyval(idx,x))
+        pl.ylim(.6,1.1)
+    return idx
+
+def recalib(waf,idx1,idx2,invert=False,ibands=[0],vlims=[0.3,1.1]):
+    for j in ibands:
+        x=waf.samps[0].bands[j].ix
+        if np.iterable(idx1):
+            corval1=np.polyval(idx1,x)
+            corval1[corval1<vlims[0]]=vlims[0]
+            corval1[corval1>vlims[1]]=vlims[1]
+        else:
+            corval1=idx1
+        if invert: corval1=1/corval1
+        if np.iterable(idx2):
+            corval2=np.polyval(idx2,x)
+            corval2[corval2<vlims[0]]=vlims[0]
+            corval2[corval2>vlims[1]]=vlims[1]
+        else:
+            corval2=idx2
+        if invert: corval2=1/corval2
+        for i in range(len(waf.samps)):
+            sm=waf.samps[i]
+            sm.bands[j].iy/=(i*corval2+(len(waf.samps)-i)*corval1)/len(waf.samps)
+
+#empirical fitting
+def spec_fit(waf,prange=[.2,2],lbin=8,loud=0,istart=50,uband=0,esel=[],mode='inve'):
+    bd=waf.samps[istart].bands[uband]
+    zsel=bd.sel.copy()
+    if len(esel)>1:
+        zsel[bd.ix<esel[0]]=False
+        zsel[bd.ix>esel[1]]=False
+    x=bd.ix[zsel].copy()
+    x-=x.mean()
+    import spectra
+    of,chi=spectra.fitting(x,bd.absol()[zsel],lbin=lbin,prange=prange,loud=abs(loud),fit_mode=0,refr_mode=mode)#"simpl")
+    apars,achi=[],[]
+    if loud<0: return of,chi
+    for s in waf.samps:
+        cof,chi=spectra.fitting(x,s.bands[uband].absol()[zsel],lbin=lbin,p0=of,prange=prange,loud=0,fit_mode=0,refr_mode=mode)
+        apars.append(cof)
+        achi.append(chi)
+    return np.array(apars).T,np.array(achi)
+
+def fitme(sm,lab="first",inlab=None,loud=0):
     if inlab==None: inlab=lab
     cvals=sm.census(inlab,valid=valrange)
     if len(cvals)>0:
@@ -20,6 +74,8 @@ def fitme(sm,lab="first",inlab=None):
         thk=(valrange[0]+valrange[1])/2.#waf3.thick(inlab)
     if thk<valrange[0]: thk=valrange[0]
     if thk>valrange[1]: thk=valrange[1]
+    if loud>0:
+        print("thick %.1f nm"%thk)
     if has_bounds:
         bounds=[valrange]
         for i in range(len(sm.bands)):
@@ -144,12 +200,15 @@ def wafplot(waf,col=2,lims=[450,485],lab='both',fname=None):
     columns:
     2: thickness
     3: quality band 0
-    4: quality band 1
+    4: quality band 1 # if more than 1 band
     5,6: linear correction band 0
-    7,8: linear correction band 1
+    7,8: linear correction band 1 # if more than 1 band
     '''
     from matplotlib import pyplot as pl
-    rep2=np.array([list(sm.pos)+[sm.thick[lab],sm.bands[0].qfit,sm.bands[1].qfit]+list(sm.bands[0].rat)+list(sm.bands[1].rat) for sm in waf.samps if lab in sm.thick])
+    if len(waf.samps[0].bands)>1:
+        rep2=np.array([list(sm.pos)+[sm.thick[lab],sm.bands[0].qfit,sm.bands[1].qfit]+list(sm.bands[0].rat)+list(sm.bands[1].rat) for sm in waf.samps if lab in sm.thick])
+    else:
+        rep2=np.array([list(sm.pos)+[sm.thick[lab],sm.bands[0].qfit]+list(sm.bands[0].rat) for sm in waf.samps if lab in sm.thick])
     rep2b=np.array([list(sm.pos)+[0] for sm  in waf.samps if not lab in sm.thick])
     pl.scatter(rep2b[:,0],rep2b[:,1],marker="x")
     if len(lims)>0:

@@ -122,8 +122,8 @@ public class specserve2 implements Provider<Source> {
   public String expoline(int nstep,int dstep,int intime,int chsel,int aver,char dir) //throws InterruptedException
   {
     String rep="";
-    //SerialPort comPort = SerialPort.getCommPorts()[0];
-    SerialPort comPort = SerialPort.getCommPort("COM4");
+    SerialPort comPort = SerialPort.getCommPorts()[0];
+    //SerialPort comPort = SerialPort.getCommPort("COM4");
     comPort.setBaudRate(250000);
     comPort.setComPortTimeouts(1,1,1);
     comPort.openPort();
@@ -135,11 +135,11 @@ public class specserve2 implements Provider<Source> {
       TimeUnit.SECONDS.sleep(1);
       // ma vratit ok C: X:0.00 Y:0.00 Z:0.00 E:0.00
     } catch (InterruptedException e) {};
-	int nbytes=comPort.bytesAvailable();
+	int nbytes=100;//comPort.bytesAvailable();
 	byte[] readBuffer;
 	int numRead;
 	if (nbytes>0) {
-		readBuffer = new byte[nbytes];
+        readBuffer = new byte[nbytes];
 		numRead = comPort.readBytes(readBuffer, readBuffer.length);
 		if (numRead>1) {
 		  String inp1= new String(readBuffer);
@@ -169,17 +169,19 @@ public class specserve2 implements Provider<Source> {
       rep+="<pos>"+Integer.toString(pos)+"</pos>";
     }
 
+    try {
     if (1==0) {
        while (true)
        {
-          //while (comPort.bytesAvailable() == 0)
-          //   Thread.sleep(20);
+          while (comPort.bytesAvailable() == 0)
+            Thread.sleep(20);
 
           readBuffer = new byte[comPort.bytesAvailable()];
           numRead = comPort.readBytes(readBuffer, readBuffer.length);
           System.out.println("Read " + numRead + " bytes.");
        }
-    } //catch (Exception e) { e.printStackTrace(); }
+    }
+    } catch (Exception e) { e.printStackTrace(); }
     comPort.closePort();
     return rep;
   }
@@ -356,6 +358,8 @@ public class specserve2 implements Provider<Source> {
         if (numberOfSpectrometers < 1){              // Check for any spectrometers
             System.out.println("There are no spectrometers attached to the computer");
             return;
+        } else {
+            System.out.println("Something found");
         }
         serialNumber = wrapper.getSerialNumber(0);              // gets the serial number from the first spectrometer
         System.out.println("Serial Number: " + serialNumber);   // prints the serial number to the screen

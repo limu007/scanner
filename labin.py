@@ -41,7 +41,7 @@ def unitconv(ufrom,uto,values):
 
 ######### SPECTROSCOPY #############
 from ctypes import c_ushort, c_uint8, c_uint16, c_uint32, c_float, c_double, c_char, c_int, pointer
-from ctypes import windll, Structure
+from ctypes import Structure
 
 class DarkCorrectionType(Structure):
     _fields_ = [("m_Enable", c_uint8),
@@ -701,6 +701,7 @@ class avantes(specscope):
     def __init__(self,port=0,loud=0):
         '''port=0: USB, others are COM
         '''
+        from ctypes import windll
         self.device = windll.as5216
         l_Port = self.device.AVS_Init(port)
         if loud>0: print("testing device at port %i"%l_Port)
@@ -1138,18 +1139,19 @@ class webocean(specscope):
     
     def start(self,path,incr=0):
         self.path=path
-        comm=rc.java_exec+' -cp ".;'+rc.java_ooijar+'"  '
+        #comm=rc.java_exec+
+        comm=['-cp ".;'+rc.java_ooijar+'"']
         portnum=self.path[self.path.rfind(":")+1:]
         portnum=portnum[:portnum.find('/')]
         if incr!=0:
             portnew=str(int(portnum)+incr)
             self.path=self.path.replace(portnum,portnew)
             portnum=portnew
-        comm+='specserve2 '+portnum#.specserve2'
-        print("starting "+comm)
+        comm+=['specserve2',portnum]#.specserve2'
+        print("starting "+''.join(comm))
         import subprocess,os
         os.environ['PATH']+=";"+rc.jdkpath+";"+rc.java_ooipath
-        self.scomm=subprocess.Popen(comm,cwd=rc.java_runpath,stdout=subprocess.PIPE)
+        self.scomm=subprocess.Popen(comm,executable=rc.java_exec,cwd=rc.java_runpath,stdout=subprocess.PIPE)
         from scanner.exutils import NonBlockingStreamReader as nbsr
         self.spout=nbsr(self.scomm.stdout)
         self.splog=[]

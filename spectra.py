@@ -460,7 +460,10 @@ def extrema(x,b=None,lbin=0,poly=0,ret_all=False,check_bins=True,msplit=False,re
     if lbin>1: #length of the bin
         nbin=len(x)//lbin
         if iterable(b) and check_bins: #is binning correct
-            if (b[::lbin].std()>b[::lbin].mean()):
+            db=(b[lbin:]-b[:-lbin])
+            if (db[::lbin].std()>abs(db[::lbin].mean())):
+                if loud>2: print(db[::lbin].mean(),db[::lbin].std())
+                #            if (b[::lbin].std()>b[::lbin].mean()):
                 print('binning not uniform: using spline interpolation')
                 if b[0]>b[-1]:dir=-1
                 else: dir=1
@@ -610,12 +613,16 @@ def sin_com(p,x,y=None,np=None,nord=2,inv=False,cent=False):
     nord+1 last values of p are used for background
     so len(p) should be at least 2*nord+4
     '''
-    from numpy import sin,arctan,polyval
+    from numpy import sin,arctan,polyval,iterable
     #q=p[:nord+1].copy()
-    p[0]*=-p[0] #simple constraint, quadratic parameter should be negative
+    
+    #!CANCELED - not fitting only interference packets
+    #p[0]*=-p[0] 
+    #simple constraint, quadratic parameter should be negative
+
     if cent:a=polyval(p[:nord+1],x-x.mean()) #amplitude of periodic func.
     else: a=polyval(p[:nord+1],x)
-    if (np!=None) and (len(np)>1): ph=x*(1+np[0]*x**2+np[1]*x**4)/p[nord+1]
+    if iterable(np) and (len(np)>1): ph=x*(1+np[0]*x**2+np[1]*x**4)/p[nord+1]
     else: ph=x/p[nord+1]
     if inv=='frac':
         f=a*(sin(2*pi*(ph+p[nord+2]))+p[nord+5])
@@ -627,7 +634,7 @@ def sin_com(p,x,y=None,np=None,nord=2,inv=False,cent=False):
         else: f=a*(2-3/(2+sin(2*pi*(ph+p[nord+2]))))
     else: f=a*sin(2*pi*(ph+p[nord+2]))
     f+=polyval(p[-nord-1:],x) #baseline profile
-    if y!=None: f-=y
+    if iterable(y): f-=y
     return f
 
 global last_pars
@@ -641,6 +648,8 @@ def fitting(x,y,p0=None,prange=None,bounds=None,loud=1,fit_mode=1,refr_mode=None
     nord: order of polynom of baseline/amplitude fit
     nprof: profile of index of refraction [parameters of Cauchy]
     returns parameters (ampl.polynom + period + phase-shift + bckg. polynom [+ 2-par Cauchy profile]) and chi2
+
+    p0: initial set of parameters (if not given, tries to estimate using "extrema" function)
     '''
     global sin_fin,par_con,last_pars
     if fit_mode<0: fit_mode=glob_fit_mode
@@ -673,11 +682,11 @@ def fitting(x,y,p0=None,prange=None,bounds=None,loud=1,fit_mode=1,refr_mode=None
             #elif nord==2: sin_fin=lambda p,x,y:((p[0]*x*x+p[1]*x+p[2])*sin(2*pi*(x/p[3]+p[4]))+p[5]*x*x+p[6]*x+p[7]-y)
             #else: sin_fin=lambda p,x,y:((p[0]*x+p[1])*sin(2*pi*(x/p[2]+p[3]))+p[4]*x+p[5]-y)
     if p0==[]: return
-    if p0=='last': p0=last_pars
-    elif p0==None:
+    if type(p0)==str and p0=='last': p0=last_pars
+    elif not iterable(p0):
         if lbin<0 and len(x)>200: lbin=20
         try:
-            am,ad,ip,iq=extrema(y,x,poly=nord,all=True,loud=2,lbin=lbin,check_bins='full',msplit='sort')
+            am,ad,ip,iq=extrema(y,x,poly=nord,ret_all=True,loud=loud,lbin=lbin,check_bins='full',msplit='sort')
         except:
             return [array([0.]*(nord+6)),10000]
         phas=0

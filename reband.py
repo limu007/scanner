@@ -3,7 +3,9 @@ import numpy as np
 refer=None
 diel={}
 minmodval=0.05
+min_normstep,min_method=0.001,'L-BFGS-B'#'SLSQP'
 min_norm,max_norm=0.5,1.7 #norm correction
+max_bias=0.45
 refthk=0.5#23.7 #oxide thickness on reference sample in [nm]
 rescale=1
 #indir="C:/Users/Admin/Documents/Lab/MOCVD/lpcvd-calib/"
@@ -90,7 +92,7 @@ class Band():
         self.correct=""
         self.scale=1
         self.rat=[1,0]
-        
+
     def len(self):
         return self.ix.size()
 
@@ -131,10 +133,12 @@ class Band():
         if rep==0: return slist
         return dlist[np.argmin(slist)]
 
-    def renorm(self,minval=0.05,thick=None,ngrp=15.,loud=0):
+    def renorm(self,minval=0.05,thick=None,ngrp=15.,minstep=0,loud=0):
+        if minstep==0:
+            minstep=min_normstep
         if thick==None:
             if len(self.samp.thick)>0:
-                thick=self.samp.get_thick()#np.median(list(self.samp.thick.values()))
+                thick=self.samp.get_thick(unc=False)#np.median(list(self.samp.thick.values()))
             else: return
         modval=self.model([thick,1,0])
         modval[np.isnan(modval)]=0 # proc tu jsou vadne hodnoty?
@@ -149,30 +153,41 @@ class Band():
         from scipy import ndimage as nd
         mmin=modval[osel].min()
         mstep=(modval[osel].max()-mmin)/ngrp
-        if mstep<0.01:
-            ngrp=int((modval[osel].max()-mmin)/0.015)
+        if mstep<minstep/3.:
+            ngrp=int((modval[osel].max()-mmin)/minstep)
             if ngrp>2:
                 mstep=(modval[osel].max()-mmin)/ngrp
-        if mstep<0.01:
+        if mstep<minstep/3.:
+            if loud>0:
+                print("not variable enough [%i / %.2g]"%(ngrp,mstep))
             self.rat=[1,0.01]
-            return 
+            return
         modlab=((modval[osel]-mmin)/mstep).astype(int)
         #meds=nd.median(yval[osel],modlab,range(max(modlab)-1))
         #meds=nd.mean(yval[osel],modlab,range(max(modlab)-1))
         meds=np.array([np.mean(yval[osel][modlab==i]) for i in range(max(modlab)-1)])
         if loud>1:
             print(meds)
+            cnt=np.array([sum(modlab==i) for i in range(max(modlab)-1)])
+            print(cnt)
             print(modlab.min(),modlab.max(),sum(modlab==modlab.max()))
             print(nd.standard_deviation(yval[osel],modlab,range(max(modlab)-1)))
+        #first a robust fit
         vpos=mmin+mstep*np.r_[0.5:ngrp]
         vpos=vpos[:len(meds)]
         res0=np.polyfit(vpos,meds,1)
+        if loud>0:
+            print(res0)
         dif=abs(modval[osel]*res0[0]+res0[1]-yval[osel])
         lim=np.percentile(dif,90)
-        dif[np.isnan(dif)]=2*lim
+        dif[np.isnan(dif)]=2*lim 
         isel=np.r_[:len(osel)][osel][dif>lim] #indices where residual is too big
         osel[isel]=False
         res=np.polyfit(modval[osel],yval[osel],1)
+        if loud>0:
+            chi2=np.sum((np.polyval(res,modval[osel])-yval[osel])**2)
+            chi2out=np.sum((np.polyval(res,modval[isel])-yval[isel])**2)
+            print(res,chi2,chi2out)
         if (res[0]<min_norm):
             res[0]=min_norm
         if (res[0]>max_norm):
@@ -232,15 +247,16 @@ class Band():
            dielectric as SiN, SiO2 and cauchy models
            substrate is Si
            TODO: more variability!
-           
+
            prefun: returns reflectivity with precalculated dielectric functions
         '''
         from . import profit
         if len(pars)<3:
-            if renow: self.renorm(minmodval,pars[0])
+            if renow: self.renorm(minmodval,thick=pars[0])
             if hasattr(self,"rat"): p=[pars[0],self.rat[0],self.rat[1]]
             else: p=[pars,1,0]
         else:p=pars[:3]
+        substr=diel['ksi'](self.ix)
         if self.samp.lay!=None:
             tlay=self.samp.lay.split('/')[0]
             if tlay=='SiN':#self.samp.lay.find('SiN')>=0:
@@ -252,19 +268,19 @@ class Band():
                     else:
                         print("cannot find SiN data: "+indir+sinname)
                     diel['ksin']=ip.interp1d(tsin[0],(tsin[1]+1j*tsin[2])**2)
-                epsi=[diel['ksin'](self.ix),diel['ksi'](self.ix)]
+                epsi=[diel['ksin'](self.ix),substr]
             elif tlay=='cau': #Caucjy profile
                 if len(pars)>3:
                     if not 'cau' in diel: diel['cau']=lambda x:np.polyval(pars[3:][::-1],x**2)**2
                     epsi=[np.polyval(pars[3:][::-1],self.ix**2)**2,diel['ksi'](self.ix)]
                 elif 'cau' in diel:
-                    epsi=[diel['cau'](self.ix),diel['ksi'](self.ix)]
+                    epsi=[diel['cau'](self.ix),substr]
             elif tlay in diel: #user defined dielectric function
-                epsi=[diel[tlay](self.ix),diel['ksi'](self.ix)]    
+                epsi=[diel[tlay](self.ix),substr]
             else:#expecting SiO2
-                epsi=[diel['ksio2'](self.ix),diel['ksi'](self.ix)]
+                epsi=[diel['ksio2'](self.ix),substr]
         else: #by default
-            epsi=[diel['ksio2'](self.ix),diel['ksi'](self.ix)]
+            epsi=[diel['ksio2'](self.ix),substr]
         if prefun:
             if hasattr(self,"rat") and len(pars)<2: #fixed renormalization
                 return lambda p:profit.plate(self.ix,epsi,[p[0]])*self.rat[0]+self.rat[1]
@@ -275,10 +291,10 @@ class Band():
         from matplotlib import pyplot as pl
         if match:
             pl.plot(self.ix[self.sel],(self.absol()[self.sel]-self.rat[1])/self.rat[0])
-        else:    
+        else:
             pl.plot(self.ix[self.sel],self.absol()[self.sel])
         if amodel and len(self.samp.thick)>0:
-            thick=self.samp.get_thick()
+            thick=self.samp.get_thick(unc=False)
             if match:## proc kdyz to umi spocitat model uvnitr? chceme model oprosteny od renormalizace..aby navazovaly sousedni intervaly(?)
                 pl.plot(self.ix[self.sel],(self.model([thick])[self.sel]-self.rat[1])/self.rat[0])
                 #pl.plot(self.ix[self.sel],self.model([thick,1,0])[self.sel])
@@ -291,7 +307,7 @@ class Band():
         save: label for storing fit results (in self.sample)
         '''
         from scipy import optimize as op
-        if prefun: # save 
+        if prefun: # save
             iabs=self.absol()[self.sel]
             imod=self.model([0]+irat,prefun=True)
             if refer!=None:
@@ -304,15 +320,20 @@ class Band():
         else:
             resid=lambda p:sum((self.absol()[self.sel]-self.model(p)[self.sel])**2)
         if inval==None: return resid
-                    
+
         from numpy import iterable
         if iterable(inval):
             initv=[inval[0],irat[0],irat[1]]+list(inval[1:])
         else:
             initv=[inval,irat[0],irat[1]]
         if iterable(constr):
-            res=op.minimize(resid, initv, method='SLSQP', bounds=constr)
+            res=op.minimize(resid, initv, method=min_method, bounds=constr)
             zpar=res.x
+            if hasattr(res,'hess_inv'):
+                if hasattr(res.hess_inv,'todense'):
+                    cov=res.hess_inv.todense()
+                    self.err=np.sqrt(cov.diagonal())
+                    self.cor=cov/self.err[:,np.newaxis]/self.err[np.newaxis,:]
         else:
             zpar=op.fmin(resid,initv,full_output=False,disp=False)
         self.qfit=resid(zpar)
@@ -340,6 +361,7 @@ class Sample():
     def __init__(self,fname,laystruct="SiO2/Si",delim=None,maxband=0,data=None,headerow=0,bord=10):
         self.bands=[]
         self.thick={}
+        self.thickerr={}
         self.chi2={}
         self.fname=fname
         self.nearest={}
@@ -392,23 +414,35 @@ class Sample():
         for i in range(len(self.bands)):
             if i>=len(dark.bands): break
             self.bands[i].corrdark(dark.bands[i].iy)
-    
-    def get_thick(self,select=None):
+
+    def get_thick(self,select=None,unc=True):
         if len(self.thick)==0: return None
         vlist=[]
         if select!=None:
-            vlist=[v for k,v in self.thick.items() if k.find(select)>=0]
+            klist=[k for k,v in self.thick.items() if k.find(select)>=0]
         elif len(self.inval_thick)>0:
-            vlist=[v for k,v in self.thick.items() if k not in self.inval_thick]
+            klist=[k for k,v in self.thick.items() if k not in self.inval_thick]
         if len(vlist)==0:
-            vlist=list(self.thick.values())
-        vlist=[v for v in vlist if v>0]
-        return np.median(vlist)
-            
+            klist=list(self.thick.keys())
+        vlist=np.array([self.thick[k] for k in klist if self.thick[k]>0])
+        if len(vlist)==0: return None
+        elist=np.array([self.thickerr.get(k,0) for k in klist if self.thick[k]>0])
+        if np.all(elist==0): elist[:]=1
+        else: elist[elist==0]=elist.max()
+        if len(vlist)==1:
+            vcom,ecom=vlist[0],elist[0]
+        else:
+            ecom=1/np.sqrt((1/elist**2).sum())
+            vcom=((vlist/elist**2).sum()*ecom**2)
+        if not unc: return vcom
+        import uncertainties as uc
+        return uc.ufloat(vcom,ecom)
+        #return np.median(vlist)
+
     def get_qfit(self,thk=None,save=True):
         res=[]
-        if thk==None: 
-            thk=self.get_thick()
+        if thk==None:
+            thk=self.get_thick(unc=False)
             if thk==None: return
         for bd in self.bands:
             if not hasattr(bd,'rat'):
@@ -417,11 +451,24 @@ class Sample():
             res.append(bresid([thk]+list(bd.rat)))
             if save: bd.qfit=res[-1]
         return res
-    
+
     def renorm(self,thick=None):
         for bd in self.bands:
             bd.renorm(thick=thick)
+            
+    def get_cov(self,pars,refer=None,fix_zero=False):
+        from scipy import optimize as op
+        if refer!=None:
+            sigma=np.concatenate([refer.bands[i].iy[self.bands[i].sel] for i in range(len(self.bands))])
+        else:
+            sigma=None
+        if fix_zero:
+            resid=lambda p:np.concatenate([self.absol()[bd.sel]-self.model([p[0],p[i+1],0])[bd.sel] for i,bd in enumerate(self.bands)])
+        else:
+            resid=lambda p:np.concatenate([self.absol()[bd.sel]-self.model([p[0],p[2*i+1],p[2*i+2]])[bd.sel] for i,bd in enumerate(self.bands)])
+        return resid,sigma
     
+
     def fit(self,inval=None,save=None,refer=None,prefit=False,prefun=False,fix_zero=False,constr=None):
         '''
         prefun: returns model function, not final optimization result
@@ -450,12 +497,19 @@ class Sample():
             inarr=np.concatenate([[inval]]+[b.rat for b in self.bands])
         if fix_zero:
             inarr=np.concatenate([inarr[:1],inarr[1::2]])
-            
+
         if inval==None: return inarr
         # we need parameter constraints
         if iterable(constr):
-            res=op.minimize(resid, inarr, method='SLSQP', bounds=constr)
+            res=op.minimize(resid, inarr, method=min_method, bounds=constr)
             zpar=res.x
+            #if save: return res
+            if hasattr(res,'hess_inv'):
+                if hasattr(res.hess_inv,'todense'):
+                    cov=res.hess_inv.todense()
+                    self.err=np.sqrt(cov.diagonal())
+                    self.cor=cov/self.err[:,np.newaxis]/self.err[np.newaxis,:]
+
         else:
             zpar=op.fmin(resid,inarr,full_output=False,disp=False)
         if np.isnan(zpar[0]):
@@ -532,7 +586,7 @@ class Sample():
 
     def get_name(self):
         return "pos_"+str(list(self.pos))[1:-1].replace(",","_").replace(" ","")
-            
+
     def todo(self,lab='both'):
         return [s for s in self.nearest.values() if lab not in s.thick]
 
@@ -551,14 +605,14 @@ class Sample():
                     del rvals[i]
         return rvals
 
-        
+
     def dump_hash(self,ofile,label=None):
         if label==None and len(self.pos)>0:
             label=self.get_name()
         for k in self.thick.keys():
             if k in self.inval_thick: continue
             ofile.write(label+": %s : %.4f\n"%(k,self.thick[k]))
-            
+
     def load(self,fname):
         of=open(fname)
         for l in of:
@@ -598,7 +652,7 @@ class Wafer():
     def corrdark(self,dark):
         for sm in self.samps:
             sm.corrdark(dark)
-            
+
     def band_limit(self,iband=0,xmin=0,xmax=None,reset=False):
         for sm in self.samps:
             if len(sm.bands)<iband+1: continue
@@ -610,7 +664,7 @@ class Wafer():
                     bd.sel[bd.ix<xmin]=False
             if xmax>0:
                 bd.sel[bd.ix>xmax]=False
-        
+
 
     def transpose(self,nbext=0,pos=[]):
         if nbext==0: nbext=len(self.samps)
@@ -628,10 +682,26 @@ class Wafer():
                 nsamps[-1].pos=pos[j]
         #self.make_hash()
         return nsamps
-    
-    def get_pos():
+
+    def get_pos(self):
         return np.array([list(sm.pos) for sm in self.samps]).T
-    
+
+    def get_nearest(self,x,y,cnt=1):
+        cent=np.array([x,y]).reshape(2,1)
+        dist2=((self.get_pos()-cent)**2).sum(0)
+        smbest=self.samps[np.argmin(dist2)]
+        if cnt==1: return [smbest]
+        smsom=[smbest]+[s for s in smbest.nearest.values()]
+        smset=set(smsom)
+        for s in smsom[1:]:
+            for s2 in s.nearest.values():
+                smset.add(s2)
+        smsom=list(smset)
+        dist2=((np.array([list(sm.pos) for sm in smsom]).T-cent)**2).sum(0)
+        print(len(dist2),np.sqrt(max(dist2)))
+        smids=np.argsort(dist2)[:cnt]
+        return [smsom[i] for i in smids]
+
     def get_edge(self,pos=None,rep=1):
         if not np.iterable(pos):
             pos=self.get_pos()
@@ -653,12 +723,12 @@ class Wafer():
             klist=["pos_"+str(list(p))[1:-1].replace(",","_").replace(" ","") for p in edgpos]
             return [self.samps[self.names[k]] for k in klist if k in self.names]
         return edgpos
-    
+
     def make_hash(self,nearest=10,dshift=0.001):
         self.names={}
         allpos=[]
         for sm in self.samps:
-            if len(sm.pos)<1: 
+            if len(sm.pos)<1:
                 allpos.append([0,0])
                 continue
             self.names[sm.get_name()]=sm
@@ -667,7 +737,7 @@ class Wafer():
         allpos=array(allpos)
         anear=[]
         for sm in self.samps:
-            if len(sm.pos)<2: continue 
+            if len(sm.pos)<2: continue
             dist=sqrt(((allpos-sm.pos[np.newaxis,:])**2).sum(1))
             nidx=np.argsort(dist)[1:nearest+1]
             sm.nearest.clear()
@@ -675,7 +745,7 @@ class Wafer():
                 sm.nearest[dist[i]+dshift*i]=self.samps[i]
             anear.append(dist[nidx[0]])
         print("nearest neighbour distance %.2f +- %.2f"%(np.mean(anear),np.std(anear)))
-            
+
     def census(self,attr,vnull=0,bmin=0,bmax=None):
         rep=[]
         for sm in self.samps:
@@ -719,7 +789,7 @@ class Wafer():
                 else:
                     b.fit(thguess,save="b%i"%(i+1))
                 i+=1
-    
+
     def mark_empty(self,mark="proc",perc=10,min_cnt=2,iband=0,rep=0,ndiv=20):
         fun2 = lambda sm:np.percentile(sm.bands[iband].iy[sm.bands[iband].sel],100-perc)-np.percentile(sm.bands[iband].iy[sm.bands[iband].sel],perc)
         dat2=np.array([fun2(sm) for sm in self.samps])
@@ -762,7 +832,7 @@ class Wafer():
                     except:
                         print("not parsing "+l)
         return j,k
-                        
+
     def find_problems(self,lab='first',limdif=20):
         from numpy import median
         problems=[]
@@ -771,7 +841,7 @@ class Wafer():
                 problems.append(sm)
                 continue
             mvals=sm.census(lab)
-            if abs(sm.thick[lab]-np.median(mvals))>limdif: 
+            if abs(sm.thick[lab]-np.median(mvals))>limdif:
                 problems.append(sm)
         return problems
 
