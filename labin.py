@@ -141,6 +141,12 @@ class specscope(object):
         self.config.Material=b'simu'
         #if 'aver' in kwargs: self.config.m_NrAverages=int(kwargs['aver'])
         return
+
+    def set_acquisition(self,expo,aver):
+        if self.config!=None:
+            self.config.m_IntegrationTime=int(expo)
+            self.config.m_NrAverages=int(aver)
+
     def measure(self,npix=None,**kwargs):
         from numpy.random import normal
         from math import sqrt
@@ -584,10 +590,12 @@ class ocean(specscope):
     #flat=None
     #last=None
     time=None
+    intime=100
     #ddev=None
     #alldev=None
     dsize=2048
-    def __init__(self):
+
+    def get_pype(self):
         import os,jpype
         if rc.java_jdk: #linux?
             os.environ['OOI_HOME']=rc.ooihome
@@ -595,9 +603,22 @@ class ocean(specscope):
             os.environ['JVM_ROOT']=os.environ['JAVA_HOME']
             os.environ['JDK_INCLUDE_FILE_ROOT']=rc.java_jdk
             os.environ['LD_LIBRARY_PATH']=os.environ['OOI_HOME']+':'+os.environ['JAVA_HOME']+'/amd64/server'
-
         jpype.startJVM(rc.java_jvm,"-Djava.class.path="+os.environ['OOI_HOME']+"/OmniDriver.jar")
-        self.device = jpype.JPackage("com").oceanoptics.omnidriver.api.wrapper.Wrapper();
+        return jpype.JPackage("com").oceanoptics.omnidriver.api.wrapper.Wrapper();
+
+    def get_nius(self):
+        import os
+        os.environ['PATH']+=";"+rc.jrepath+"\\server"
+        os.environ['JAVA_HOME']=rc.jdkpath
+        import jnius_config
+        jnius_config.set_classpath('.', rc.java_ooipath+"OmniDriver.jar")
+        from jnius import autoclass
+        wrap=autoclass('com.oceanoptics.omnidriver.api.wrapper.Wrapper')
+        return wrap()
+
+    def __init__(self):
+        
+        self.device = self.get_nius()
         self.device.openAllSpectrometers()
         self.dsize=self.device.getNumberOfPixels(0)
         self.name=self.device.getFirmwareModel(0)
@@ -633,11 +654,11 @@ class ocean(specscope):
         self.device.setCalibrationCoefficientsIntoEEProm(0,nchan,c,True, True, True)
 
     def end(self):
-        import os,jpype,time
+        #import os,jpype,time
         self.device.closeAllSpectrometers()
         #time.sleep(2)
         #del self.device
-        jpype.shutdownJVM()
+        #jpype.shutdownJVM()
 
 class oceanjaz(ocean):
     '''multichannels
@@ -645,9 +666,16 @@ class oceanjaz(ocean):
     nchan=1
     chord=[]
     chrange=[]
+    chanene=[]
+    intfact=[]
+    normfact=[]
+    normint=[]
+    ysel=None
+    
+    def setup(self,prange=[1,3000],integ=50,aver=10,calib=None,smooth=None,dyndark=False,unit=0,estep=0.02,minpix=10):
+        from numpy import polyval,r_,array,arange,argsort,zeros,ones
+        self.pixtable=arange(prange[0],prange[1],estep)
 
-    def setup(self,prange=[1,3000],integ=50,aver=10,calib=None,smooth=None,dyndark=False,unit=0):
-        from numpy import polyval,r_,array,argsort
         ext=self.device.getWrapperExtensions()
         self.nchan=ext.getNumberOfEnabledChannels(0)
         gchan=[]
@@ -656,9 +684,18 @@ class oceanjaz(ocean):
         self.chord=list(argsort(coefbeg).astype(int))
         print
         iprev=None
-        for i in self.chord:
+        self.intime=integ
+        
+        for i in range(len(self.chord)):
+            self.device.setIntegrationTime(0, int(i), 1000*self.intime)
+            self.device.setScansToAverage(0, int(i), aver)
+            if dyndark: self.device.setCorrectForElectricalDark(0,int(i),rc.dyndark_forget)
+
             coef=array(self.device.getCalibrationCoefficientsFromEEProm(0,int(i)).getWlCoefficients())
             xchan=list(polyval(coef[::-1],r_[:self.dsize]))
+            if len(self.chord)>0:
+                self.chanene.append(unitconv(1,unit,array(xchan)))
+                continue
             print("ch.%i:%.1f-%.1f"%(i,xchan[0],xchan[-1]))
             if len(gchan)>0:
                 nleft=sum(xchan<gchan[-1])
@@ -672,20 +709,52 @@ class oceanjaz(ocean):
 
             self.chrange[i]=[xmid,self.dsize]
             #print("chan. %i:%.2f-%.2f nm"%(i+1,gchan[-1][0],gchan[-1][-1]))
-            self.device.setIntegrationTime(0, int(i), 1000*integ)
-            self.device.setScansToAverage(0, int(i), aver)
-            if dyndark: self.device.setCorrectForElectricalDark(0,int(i),rc.dyndark_forget)
             iprev=i
-        self.pixtable=unitconv(1,unit,array(list(gchan)))
+        self.chanval=zeros((len(self.chanene),max([len(c) for c in self.chanene])))
+        self.intfact=list(ones((len(self.chanene))))
+        for i in range(len(self.chord)):
+            if sum(self.chanene[i]>prange[0])<minpix: self.intfact[i]=0
+            if sum(self.chanene[i]<prange[1])<minpix: self.intfact[i]=0
+        #self.pixtable=unitconv(1,unit,array(list(gchan)))
+    
+    def set_acquisition(self,expo,aver):
+        self.intime=int(expo)
+        for i in range(len(self.chanval)):
+            self.device.setIntegrationTime(0, int(i), int(1000*self.intime*self.intfact[i]))
+            self.device.setScansToAverage(0, int(i), int(aver))
+    
+    def dark(self,specsel=0):
+        self.device.setStrobeEnable(specsel,0)
+        self.dark=self.measure()
+        self.device.setStrobeEnable(specsel,1)
 
     def measure(self,**kwargs):
-        data=[]
+        #self.ddev=[]
         from numpy import array
         for i in self.chord:
+            if self.intfact[i]==0: 
+                continue
+            pixval=self.device.getSpectrum(0,int(i))
+            self.chanval[i,:len(pixval)]=pixval
             #spectrum = array(self.device.getSpectrum(0,i))
-            data+=list(self.device.getSpectrum(0,int(i)))[self.chrange[i][0]:self.chrange[i][1]]
+            #self.ddev.append(list(self.device.getSpectrum(0,int(i)))[self.chrange[i][0]:self.chrange[i][1]])
             #print("chan. %i:max %.2f  mean %.2f"%(i+1,spectrum.max(),spectrum.mean()))
+        return self.chanval
+
+    def result(self,smooth=0,sub_dark=True,div_flat=True,maxit=0):
+        data=self.measure().astype(float)
+        if sub_dark and iterable(self.dark): data-=self.dark
+        if div_flat and iterable(self.flat):
+                data/=self.flat
+                if rc.hard_spec_min: data[data<rc.hard_spec_min]=rc.hard_spec_min
+                if rc.hard_spec_max: data[data>rc.hard_spec_max]=rc.hard_spec_max
+        for i in range(len(data)):
+            if smooth>1:
+                data[i]=self.smooth(data[i],wid=smooth)
+            
+        self.last=data
         return data
+
 
 class avantes(specscope):
     '''developped and tested for AvaSpec 3648
@@ -1068,59 +1137,6 @@ def gettrans(enx,dpos,ref,smot=0.03,skiplowest=0,rep=1,osel=None,disfun=None,wei
             caltab[j][:,istart[i]:iend[i]+1]*=zub[j]
     return caltab,ysel
 
-def gettransold(enx,dpos,ref,smot=0.03,skiplowest=0,rep=1,scale=[],spow=1):
-    '''create transformation table
-    '''
-    import numpy as np
-    ysel=None
-    if skiplowest>0:
-        ysel=[ref[i]>np.percentile(ref[i],skiplowest) for i in range(len(ref))]
-        ref=[ref[i][ysel[i]] for i in range(len(ref))]
-    else:
-        ysel=[d>0 for d in dpos]
-    caltab=[]
-    for j in range(len(ref)):
-        cmat=smot-abs(dpos[j][ysel[j]][:,np.newaxis]-enx[np.newaxis,:])
-        cmat[cmat<0]=0
-        csum=cmat.sum(0)
-        cmat[:,csum>0]/=csum[csum>0]
-        caltab.append(cmat)
-    if rep==-1: return caltab,ysel
-    istart,iend=overlaps(caltab)
-    for i in range(len(iend)):
-        print(iend[i]-istart[i])
-    for k in range(len(istart)):
-        zub=np.array([ref[j].dot(caltab[j])[istart[k]:iend[k]+1] for j in range(len(ref))])
-        #if len(scale)==len(zub): zub=np.array(scale)[:,np.newaxis]*zub
-        for i in range(len(zub)):
-            zub[i]-=zub[i].min()
-            if zub[i].max()==0: continue
-            if spow<0:
-                minpos=np.argmin(zub[i])
-                maxpos=np.argmax(zub[i])
-                print("[%i:%i]"%(minpos,maxpos))
-                if minpos<maxpos:
-                    if minpos>0: zub[i][:minpos]=0
-                    if maxpos<len(zub[i])-1: zub[i][maxpos+1:]=zub[i][maxpos]
-                else:
-                    if minpos<len(zub[i])-1: zub[i][minpos:]=0
-                    if maxpos>0: zub[i][:maxpos]=zub[i][maxpos]
-        #print(zub.shape)
-        zn=zub.sum(1)
-        zn[zn==0]=1
-        zub/=zn[:,np.newaxis]
-        if spow>1:
-            zub=zub**abs(spow)
-        zn=zub.sum(0)
-        zn[zn==0]=1
-        zub/=zn[np.newaxis,:]
-        for j in range(len(caltab)):
-            caltab[j][:,istart[k]:iend[k]+1]*=zub[j]
-    if len(scale)==len(caltab):
-        for j in range(len(caltab)):
-            caltab[j]/=scale[j]
-    return caltab,ysel
-
 loud=0
 class webocean(specscope):
     path="http://localhost:8889/?exp="
@@ -1148,20 +1164,38 @@ class webocean(specscope):
             self.path=self.path.replace(portnum,portnew)
             portnum=portnew
         comm+=['specserve2',portnum]#.specserve2'
-        print("starting "+''.join(comm))
+        print("starting "+rc.java_exec+" "+' '.join(comm))
         import subprocess,os
         os.environ['PATH']+=";"+rc.jdkpath+";"+rc.java_ooipath
         self.scomm=subprocess.Popen(comm,executable=rc.java_exec,cwd=rc.java_runpath,stdout=subprocess.PIPE)
         from scanner.exutils import NonBlockingStreamReader as nbsr
         self.spout=nbsr(self.scomm.stdout)
         self.splog=[]
-        
+    
+    def start_nius(self,path):
+        self.path=path
+        #comm=rc.java_exec+
+        import os
+        portnum=self.path[self.path.rfind(":")+1:]
+        portnum=portnum[:portnum.find('/')]
+        os.environ['PATH']+=";"+rc.jrepath+"\\server"
+        os.environ['JAVA_HOME']=rc.jdkpath
+        import jnius_config
+        jnius_config.set_classpath('.', rc.java_ooijar)
+        from jnius import autoclass
+        Stack = autoclass('specserve2')
+        self.scomm=Stack().main([portnum])
+        self.splog=[]
 
     def __init__(self,path=None,loud=0,chan=None):
         self.config=MeasConfigType()
         if path!=None: self.path=path
         if chan!=None: self.schan=chan
         #out=self.acomm.stdout.read()
+        #try:
+        #    self.start_nius(self.path)
+        #except:
+        #    print("direct call")
         self.start(self.path)
         from time import sleep
         sleep(5)
@@ -1316,7 +1350,7 @@ class webocean(specscope):
             savetxt(basename+"_%02i.txt"%i,array([self.chanene[i],self.chanval[i]]).T, fmt="%8.5f")
             
     def end(self):
-        if self.scomm!=None:
+        if self.scomm!=None and hasattr(self,"spout"):
             if hasattr(self,"spout"): del self.spout 
             self.scomm.terminate()
             #self.scomm.send_signal(15)
@@ -1342,7 +1376,7 @@ class uniocean(webocean):
         for ch in tree.findall("data"):
             if not "chan" in ch.attrib: continue
             pixval[int(ch.attrib["chan"])]=array([float(a) for a in ch.text.replace(",",".").split()])
-        self.intfact=list(ones((len(pixval))))
+        
         chanext=zeros((len(pixval),2))
         for i in range(len(pixval)):
             chanext[i]=pixval[i][[0,-1]]
@@ -1351,6 +1385,7 @@ class uniocean(webocean):
         sord=chanext[:,0].argsort()
         self.chanene=[unitconv(1,unit,pixval[i]) for i in range(len(sord))]
         self.chanval=zeros((len(sord),max([len(c) for c in self.chanene])))
+        self.intfact=list(ones((len(pixval))))
         for i in range(len(pixval)):
             if sum(self.chanene[i]>prange[0])<minpix: self.intfact[i]=0
             if sum(self.chanene[i]<prange[1])<minpix: self.intfact[i]=0

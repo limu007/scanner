@@ -31,8 +31,8 @@ spectr_nb_trials=3
 #----------------------------
 polar_stage=False
 
-xy_cent=[100 ,100]
-refer_pos=[5,80]
+xy_cent=[100 ,60]
+refer_pos=[5,50]
 xy_size=[180,145]
 scan_axes_order=0 # for rot. stage 0= radial first, 1=rotate first
                   # for lin. stage 0= upper first, 1=lower first
@@ -106,7 +106,8 @@ dyndark_forget=50 #percentage for dynamic dark
 
 #java_runpath="C:/Users/optik/Code/Ocean/example/java/Simple"
 #java_runpath="C:/Users/optik/Code/Ocean/scanner"
-java_exec="C:/Program Files/Java/jre1.8.0_221/bin/java.exe"
+jrepath="C:/Program Files/Java/jre1.8.0_221/bin/"
+java_exec=jrepath+"java.exe"
 #java_exec="/usr/bin/java"
 java_ooipath="C:/Users/optik/Code/"
 java_ooipath="C:/Program Files/Ocean Optics/OmniDriver/OOI_HOME/"

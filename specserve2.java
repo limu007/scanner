@@ -1,6 +1,6 @@
 //package specserve;
 
-//init with $env:Path += ";C:\Program Files\Java\jdk1.8.0_171\bin;C:\Program Files\OceanOptics\OmniDriver\OOI_HOME"
+//init with $env:Path += ";C:\Program Files\Java\jdk1.8.0_171\bin;C:\Program Files\Ocean Optics\OmniDriver\OOI_HOME"
 //	 javac -cp "C:\Users\optik\Documents\Code\Ocean\OmniDriver\OOI_HOME\OmniDriver.jar;
 //    C:\Users\optik\Documents\Code\Ocean\OmniDriver\OOI_HOME\jSerialComm-1.3.11.jar" .\specserve2.java
 //javac -cp "C:\Program Files\Ocean Optics\OmniDriver\OOI_HOME\OmniDriver.jar;C:

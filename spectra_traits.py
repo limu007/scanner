@@ -87,8 +87,8 @@ class Experiment(HasTraits):
                 HGroup(Item('shut'),Item('median',width=5),Item('combine'), Item('smooth',enabled_when="combine==False")),
                 HGroup(Item('darken',show_label=False, enabled_when="ready"),Item('refer',show_label=False, enabled_when="ready"),
                 Item('recalper',enabled_when="ready"),),
-                HGroup(Item('sname'),Item('saveme',show_label=False, enabled_when="sname!=''"), Item('savecols'), Item('record')),
-                HGroup(Item('saveall',show_label=False, enabled_when="sname!=''"),Item('refermat',label="Ref. material")),
+                HGroup(Item('sname'),Item('saveme',show_label=False, enabled_when="sname!=''"), Item('record')),
+                HGroup(Item('saveall',show_label=False, enabled_when="sname!=''"),Item('savecols'), Item('refermat',label="Ref. material")),
                 Item('errb'),#editor=CheckListEditor(values=reflist)
                 menubar=menubar,width=10)
 
@@ -101,14 +101,18 @@ class Experiment(HasTraits):
         #message(query)
 
     def _expo_changed(self):
-        if self.instr!=None: self.instr.intime=int(self.expo)
+        if self.instr!=None: 
+            self.instr.intime=int(self.expo)
+            self.instr.set_acquisition(self.expo,self.aver)
 
     def _combine_changed(self):
         if self.combine: self.smooth=1
         else: self.smooth=rc.smoothing
 
     def _aver_changed(self):
-        if self.instr!=None: self.instr.config.m_NrAverages=int(self.aver)
+        if self.instr!=None: 
+            self.instr.set_acquisition(self.expo,self.aver)
+            #self.instr.config.m_NrAverages=int(self.aver)
 
     def _errb_changed(self):
         if not hasattr(self.instr,"prof"): return
@@ -208,7 +212,7 @@ class Experiment(HasTraits):
         if self.paren.acquisition_thread and interrupt and self.paren.acquisition_thread.isAlive():
             self.paren.acquisition_thread.wants_abort = True
         self.paren.status_string="measuring reference sample"
-        from numpy import any,iterable
+        from numpy import any,iterable,percentile
         #if hasattr(self.instr,'ysel'): del self.instr.ysel
         rep=self.instr.result(div_flat=False,smooth=self.smooth,maxit=-1) #should use dark subtraction
         if not iterable(rep):
@@ -225,7 +229,11 @@ class Experiment(HasTraits):
             if iterable(self.instr.ysel):
                 self.display("channels :"+' '.join(["[%i]"%(sum(a) if iterable(a) else 0) for a in self.instr.ysel]))
                 self.display("weights :"+' '.join(["[%.2f / %i]"%(a.sum(),sum(a.sum(0)>0)) for a in self.instr.transtable if iterable(a)]))
-        else: self.display("reference stored")
+        else: 
+            for i in range(len(self.instr.flat)):
+                perc=percentile(self.instr.flat[i],[10,90])
+                self.display("ch %i:%.0f-%.0f"%(i,perc[0],perc[1]))
+            self.display("reference stored")
         self.paren.status_string="calibration finished"
         if not self.combine:
             for i in range(len(self.instr.flat)):
@@ -656,10 +664,13 @@ class Spectrac(HasTraits):
         if self.instr==None:
             if self.simulate: self.instr=labin.specscope()
             elif hasattr(rc,"xy_cent"):
-                self.instr=labin3d.webocean3d(path="http://localhost:%i/?exp="%self.port,chan=rc.chan_sel)
+                #self.instr=labin3d.webocean3d(path="http://localhost:%i/?exp="%self.port,chan=rc.chan_sel)
+                self.instr=labin3d.ocean3d()
                 self.instr.gxmax,self.instr.gymax=rc.xy_size
-            else: self.instr=labin.uniocean(path="http://localhost:%i/?exp="%self.port,chan=rc.chan_sel) ##FM replaced webocean
-        self.instr.setup([self.elow,self.ehigh],self.resol,integ=self.exper.expo,aver=self.exper.aver)
+            else: 
+                #self.instr=labin.uniocean(path="http://localhost:%i/?exp="%self.port,chan=rc.chan_sel) ##FM replaced webocean
+                self.instr=labin.oceanjaz()
+        self.instr.setup([self.elow,self.ehigh],estep=self.resol,integ=self.exper.expo,aver=self.exper.aver)
         if len(self.instr.chanene)>0: self.exper.display(" found %i channels ..."%len(self.instr.chanene))
         #if len(self.instr.chanrange)>0: self.exper.display(" found %i channels ..."%len(self.instr.chanrange))
         self.exper.instr=self.instr
@@ -668,9 +679,9 @@ class Spectrac(HasTraits):
             self.paren.scanner.instr=self.instr
             self.paren.scanner.ready=True
         self.pixels=self.instr.pixtable.copy()#
-        if self.instr.config.m_StartPixel>0 or (self.instr.config.m_StopPixel>1 and self.instr.config.m_StopPixel<len(self.pixels)):
-            self.pixels=self.pixels[self.instr.config.m_StartPixel:self.instr.config.m_StopPixel]
-        self.instr.config.Material=b'simu'
+        #if self.instr.config.m_StartPixel>0 or (self.instr.config.m_StopPixel>1 and self.instr.config.m_StopPixel<len(self.pixels)):
+        #    self.pixels=self.pixels[self.instr.config.m_StartPixel:self.instr.config.m_StopPixel]
+        #self.instr.config.Material=b'simu'
         self.instr.samp=None
         self.exper.display("setup ok [%i pixels] ..."%len(self.pixels))
         self.norm=(1,1,1)
@@ -697,7 +708,9 @@ class Spectrac(HasTraits):
         self.paren.figure.canvas.draw()
 
     def _norm_changed(self):
-        if self.instr!=None: self.instr.intfact=list(self.norm)
+        if self.instr!=None: 
+            self.instr.intfact=list(self.norm)
+            self.instr.set_acquisition(self.exper.expo,self.exper.aver)
  
     def _debug_changed(self):
         if self.instr!=None: 
@@ -1115,7 +1128,7 @@ class ControlPanel(HasTraits):
             if type(spect)!=list and len(spect.shape)==1:#self.experiment.combine:
                 self.spect_last.set_ydata(spect)
             else:
-                #from numpy import iterable,array
+                from numpy import array
                 pin=self.spectrac.instr
                 nbnd=sum(array(pin.intfact)>0)
                 if rc.debug>1: print("updating %i graphs"%nbnd)

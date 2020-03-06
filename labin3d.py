@@ -1,4 +1,4 @@
-from scanner.labin import specscope,webocean,uniocean
+from scanner.labin import specscope,webocean,uniocean,oceanjaz
 from scanner import labrc as rc
 
 class specscope3d(specscope):
@@ -48,7 +48,8 @@ class specscope3d(specscope):
                 elif ch==2:
                         self.gy+=nstep*self.scale
                         self.awrite("G1 Y%.1f"%self.gy)
-                return self.acomm(True)
+                if loud>=0: return self.acomm(True)
+                return []
 
         def goto(self,xpos,ypos):
                 if xpos>=0 and xpos<=self.gxmax: self.gx=xpos
@@ -72,6 +73,20 @@ class specscope3d(specscope):
             fx=np.r_[prof[0][i-2]:prof[0][i+3]:100j]
             self.zbest=fx[np.polyval(idx,fx).argmax()]
             return self.acom()
+
+        def ruler(self,axis=1,stp=1,nstp=60,ichan=0):
+            import numpy as np
+            side1=np.array([len(self.rate(axis,stp,loud=-1))+self.measure()[ichan].mean() for i in range(nstp)])
+            self.rate(axis,-nstp*stp)
+            splt=np.percentile(side1,[10,90]).mean()
+            if splt/side1.max()>0.8: len1=nstp*stp
+            else: len1=sum(side1>splt)*stp
+            side2=np.array([len(self.rate(axis,-stp,loud=-1))+self.measure()[ichan].mean() for i in range(nstp)])
+            self.rate(axis,nstp*stp)
+            splt2=np.percentile(side2,[10,90]).mean()
+            if splt2/side2.max()>0.8: len2=nstp*stp # mozna neco lepsiho?
+            else: len2=sum(side2>splt2)*stp
+            return len1,len2
 
         def round(self,step=10,nstep=20,cent=[95,125],rad=75,run=0):
             #  from scanner.camera_anal import circum # stred ze 3 bodu
@@ -97,6 +112,32 @@ class specscope3d(specscope):
                     
 from scanner.comband import gettrans
 #from scanner.labin import webfetch
+
+class ocean3d(oceanjaz,specscope3d):
+
+        def __init__(self, *args, **kwargs):
+            #if rc.java_ooijar.find("Serial")<0:
+            #    rc.java_ooijar+=";"+rc.java_ooipath+"jSerialComm.jar"
+            oceanjaz.__init__(self, *args, **kwargs)
+            rep=self.adrive()
+            #print(rep[-1])
+
+        def fastline(self,nstep,dstep=10,axe='X',mchan=0,bin=1,imin=None,imax=None):
+            import numpy as np
+            query=self.makequery(chan=mchan)+"&step={}&dstep={}{}".format(nstep,axe,dstep)
+            if bin>1: query+="&bin={}".format(bin)
+            print("running "+query)
+            self.ard.close()
+            out=self.getresp(query)
+            self.ard=serial.Serial(rc.ard_port,baudrate=rc.ard_speed,timeout=2)
+            pos=np.array([int(c.text) for c in out.findall("pos")])
+            data=np.array([[float(a) for a in c.text.split()] for c in out.findall("data")])
+            avg=data[:,imin:imax].mean(1)
+            return pos,avg
+            
+        def end(self):
+            oceanjaz.end(self)
+            specscope3d.end(self)
 
 class webocean3d(uniocean,specscope3d):
 
