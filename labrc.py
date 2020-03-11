@@ -92,6 +92,8 @@ ref_tables['Si']='C:\Documents and Settings\Kremik\Dokumenty\Python\period\TblRe
 ref_tables['Si-eps']='C:\Documents and Settings\Kremik\Dokumenty\Python\period\si.dat'
 ref_sample=3 # taking every ref_sample point from tables above
 
+test_map='/home/limu/Public/Cloud/Lab/Spectra/Elias/preetch/sio2_400nm_wf4_map_1.txt'
+
 scope_interface=None #'/home/optik/avantes/face/usbdir' #Linux workaround
 linux_write_delay=0.6 #waiting for all data to arrive
 

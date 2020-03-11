@@ -1,6 +1,6 @@
 #from traits.api import *
 from traitsui.api import View, Group, HGroup, HSplit, VGroup, VFold, NoButtons
-from traitsui.api import EnumEditor, TabularEditor, Menu, MenuBar, Item, UItem, Handler
+from traitsui.api import EnumEditor, TabularEditor, FileEditor, Menu, MenuBar, Item, UItem, Handler
 from traits.api import HasTraits, Int, Float, Bool, Str, Range, String, List, Tuple, Enum, File
 from traits.api import Event, Code, Button, Property, Instance
 
@@ -49,7 +49,7 @@ acquisition thread : prepare, acquire, stack/...
 problem with repeated callibration
 '''
 
-from scanner.my_editors import MPLFigureEditor, MPLInitHandler
+from scanner.my_editors import MPLFigureEditor, MPLInitHandler, SelectFromCollection
 
 #----------------------------------
 
@@ -80,6 +80,7 @@ class Experiment(HasTraits):
     paren = None
     errb = Bool(False,label="errorband",desc="whether display error band")
     recalper = Int(0,label="recalib. period",desc="regular calibration during scanning")
+    material = String("SiO2/Si",label="layer. structure")
 
     menubar = MenuBar(Menu(Action(name='test Action', action='_run_action'), name="Menu"))
 
@@ -165,16 +166,18 @@ class Experiment(HasTraits):
         savetxt(self.sname,odata,fmt="%8.5f")
         print(self.sname+" saved "+str(odata.shape))
 
-    def _saveall_fired(self):
+    def _saveall_fired(self,selected=False):
         from numpy import concatenate,array,savetxt
         self.display("stack saved ...")
         if self.combine: clist=[0]
         else: 
-            clist=[i+1 for i in range(len(self.instr.chanval)) if self.instr.intfact[i]>0]
+            clist=[i+1 for i in range(len(self.instr.chanene)) if self.instr.intfact[i]>0]
         for cn in clist: #looping through channel numbers
             if cn>0: speclst=[concatenate([[0,0],self.instr.chanene[cn-1]])]
             else: speclst=[concatenate([[0,0],self.instr.pixtable])]
             for k in self.stack.keys():
+                if selected and not k in self.paren.stack_selec:
+                    continue
                 scode=k.split("_")
                 try:
                     ix,iy=float(scode[1]),float(scode[2])
@@ -913,6 +916,8 @@ class MultiSelectAdapter(TabularAdapter):
     def _get_myvalue_text(self):
         return self.item
 
+
+
 class ControlPanel(HasTraits):
     """ This object is the core of the traitsUI interface. Its view is
     the right panel of the application, and it hosts the method for
@@ -936,11 +941,14 @@ class ControlPanel(HasTraits):
     ready=Bool(False)
     #ready=False
     acquire = Event
-    status_string = String();
+    status_string = String()
     result_plot=[]
     grcolors="rgbkmc"
     showme=Button("Show")
     delme=Button("Delete")
+    loadme=Button("Load set")
+    sname = File(rc.test_map,label="Filename")
+    saveme=Button("Save selected")
     stack_disp=[]
 
     view = View(Group(
@@ -958,7 +966,9 @@ class ControlPanel(HasTraits):
                               multi_select=True,adapter=MultiSelectAdapter())
                             #editor=ListEditor(style='simple',rows=1)
                         ),
-                        Group(Item("showme", show_label=False)),Group(Item("delme", show_label=False)),
+                        HGroup(Item("showme", show_label=False),Item("delme", show_label=False)),
+                        HGroup(Item("saveme", show_label=False),Item("loadme", show_label=False),
+                            Item("sname", show_label=False,editor = FileEditor(dialog_style='load'))),
                         label="Control", dock='tab',),
                     Group(
                             Item('spectrac', style='custom', show_label=False,),
@@ -994,27 +1004,40 @@ class ControlPanel(HasTraits):
     def _showme_fired(self):
         from matplotlib import patches
         for p in self.stack_disp:
-            p.remove()
-            del p
+            try:
+                p.remove()
+                del p
+            except:
+                pass
         self.stack_disp=[]
         i=0
+        dax=self.design.axes[0]
         for a in self.stack_selec:
             if not(a) in self.experiment.stack: continue
-            #print(a,sum(self.experiment.stack[a]))
+            print(a,sum(self.experiment.stack[a][0]))
             if self.experiment.combine:
                 mcol=rc.all_color[i%len(rc.all_color)]
                 p=self.figure.axes[0].plot(self.spectrac.pixels,self.experiment.stack[a],mcol)[0]
                 self.stack_disp.append(p)
-                coors=a.split("_")
-                i+=1
-                if len(coors)==3:
-                    try:
-                        qx,qy=int(coors[1]),int(coors[2])
-                        p=patches.CirclePolygon(qx,qy,1,color=mcol)
-                        self.stack_disp.append(p)
-                    except:
-                        print("failed parse of "+a)
-                        pass
+            else:
+                mcol=rc.all_color[i%len(rc.all_color)]
+                for j in range(len(self.experiment.instr.chanene)):
+                    ix=self.experiment.instr.chanene[j]
+                    if self.experiment.instr.intfact[j]==0: continue
+                    p=self.figure.axes[0].plot(ix,self.experiment.stack[a][j],mcol)[0]
+                    self.stack_disp.append(p)
+            coors=a.split("_")
+            if len(coors)==3:
+                try:
+                    qx,qy=float(coors[1]),float(coors[2])
+                    p=patches.CirclePolygon([qx,qy],1,color=mcol,alpha=0.3)
+                    dax.add_patch(p)
+                    self.stack_disp.append(p)
+                except:
+                    print("failed parse of "+a)
+                    pass
+            i+=1
+        
         #print("%i items shown"%(len(self.stack_disp)))
         self.figure.canvas.draw()
         self.design.canvas.draw()
@@ -1027,6 +1050,101 @@ class ControlPanel(HasTraits):
                 if a in self.experiment.stack:
                     del self.experiment.stack[a]
 
+    def _loadme_fired(self):
+        from scanner import reband
+        import os
+        if not os.path.exists(self.sname):
+           message("file "+self.sname+" not found")
+           return
+        qname=str(self.sname)
+        import re
+        ext=qname[qname.rfind(os.path.extsep):]
+        qname=re.sub("_\d"+ext,"_%i"+ext,qname)
+        elist=[]
+        for i in range(5):
+            if os.path.exists(qname%i):
+                elist.append(i)
+        print("loading from "+qname+str(elist))
+        self.wafer=reband.Wafer(qname,elist,laystruct=self.experiment.material,maxband=-1,headerow=2,position=2)
+        sm=self.wafer.samps[len(self.wafer.samps)//2]
+        sm.calib()
+        if self.experiment.instr==None:
+            self.experiment.instr=labin.specscope()
+            self.experiment.instr.chanene=[bd.ix for bd in sm.bands]
+            self.experiment.instr.intfact=list(self.spectrac.norm)
+        self.wafer.make_hash()
+        bad=[]
+        plan=[]
+
+        ax=self.design.axes[0]
+        def accept(event): #for lasso selection
+            if event.key == "enter":
+                print("Selected points:")
+                print(self.selector.xys[self.selector.ind])
+                self.selector.disconnect()
+                ax.set_title("")
+                ax.figure.canvas.draw()
+            self.status_string="%i points selected"%(len(self.selector.ind))
+
+        def onclick(event):
+            from matplotlib import patches
+            import numpy as np
+            #global aw
+            #self=aw.panel
+            if not hasattr(self,'wafer'): return
+            ssel=self.wafer.get_nearest(event.xdata, event.ydata)
+            if len(ssel)==0: return
+            samp=ssel[0]
+            print('%s click: %s button=%d, xdata=%f, ydata=%f' %
+                ('double' if event.dblclick else 'single', samp.get_name(), event.button,
+                samp.pos[0], samp.pos[1]))
+            dax=self.design.axes[0]
+            ip=len(dax.patches)
+            mcol=rc.all_color[ip%len(rc.all_color)]
+            if event.button==1:
+                if samp.get_name() in self.stack_selec:
+                    self.stack_selec.remove(samp.get_name())
+                    for k in range(len(self.stack_disp)):
+                        p=self.stack_disp[k]
+                        if type(p)==patches.CirclePolygon:
+                            if np.all(p.xy==list(samp.pos)):
+                                p.remove()
+                                del self.stack_disp[k]
+                                break
+                else:
+                    p=patches.CirclePolygon(samp.pos,1,color=mcol,alpha=0.3)
+                    dax.add_patch(p)
+                    self.stack_disp.append(p)
+                    self.stack_selec.append(samp.get_name())
+                ax.figure.canvas.draw()
+
+        cid = self.design.canvas.mpl_connect('button_press_event', onclick)
+
+        for sm in self.wafer.samps: 
+            k=sm.get_name()
+            data=[b.absol() for b in sm.bands]
+            for i in range(len(data)):
+                data[i][data[i]<0]=0 #rc.min_spec
+            self.experiment.stack[k]=data
+            self.stack_list.append(k)
+            coors=k.split("_")
+            if len(coors)==3:
+                try:
+                    qx,qy=float(coors[1]),float(coors[2])
+                    plan.append([qx,qy])
+                except:
+                    bad.append(k)
+        if len(plan)>0:
+            #pts=ax.plot([p[0] for p in plan],[p[1] for p in plan],'bd-')[0]
+            pts=ax.scatter([p[0] for p in plan],[p[1] for p in plan],marker='d')
+            ax.figure.canvas.draw()
+            #self.selector = SelectFromCollection(ax, pts)
+            #self.design.canvas.mpl_connect("key_press_event", accept)
+
+        self.experiment.display("%i points loaded"%(len(plan)))
+
+    def _saveme_fired(self):
+        self.experiment._saveall_fired(selected=True)
 
     def _start_stop_acquisition_fired(self):
         """ Callback of the "start stop acquisition" button. This starts
@@ -1269,3 +1387,22 @@ if __name__ == '__main__':
     aw.configure_traits(view=tabbedview)
     message(" press Setup first ", title = 'User request')
         
+
+def onclick(event):
+    global aw
+    self=aw.panel
+    if not hasattr(self,'wafer'): return
+    ssel=waf.get_nearest(event.xdata, event.ydata)
+    if len(ssel)==0: return
+    samp=ssel[0]
+    print('%s click: %s button=%d, xdata=%f, ydata=%f' %
+        ('double' if event.dblclick else 'single', samp.get_name(), event.button,
+        samp.pos[0], samp.pos[1]))
+    dax=self.design.axes[0]
+    ip=len(dax.patches)
+    mcol=rc.all_color[ip%len(rc.all_color)]
+    if event.button==1:
+        p=patches.CirclePolygon(samp.pos,1,color=mcol,alpha=0.3)
+        dax.add_patch(p)
+        self.stack_disp.append(p)
+    self.stack_selec.add(samp.get_name())

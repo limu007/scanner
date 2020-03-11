@@ -357,6 +357,7 @@ class Sample():
     wafer=None
     pos=[]
     inval_thick=set()#[]
+    normtab={}
 
     def __init__(self,fname,laystruct="SiO2/Si",delim=None,maxband=0,data=None,headerow=0,bord=10):
         self.bands=[]
@@ -384,11 +385,11 @@ class Sample():
         else:
             for i in range(0,maxband*2,2): #columns = [energy value energy_2 value_2 ...]
                 self.bands.append(Band(self,i,bord=bord))
-        self.norm=lambda x:1
+        #self.norm=lambda x:1
         if laystruct!=None: self.lay=laystruct
 
     def calib(self):
-        from scanner import spectra,profit
+        from scanner import spectra
         import pickle,os
         #epssi=spectra.dbload("cSi_asp")
         #pickle.dump(epssi,open(indir+"si_eps_full.mat","w"))
@@ -407,9 +408,15 @@ class Sample():
             else:
                 tsio2=np.loadtxt(indir+"sio2_palik_g.mat",unpack=True,skiprows=3)
             diel['ksio2']=ip.interp1d(tsio2[0],tsio2[1]**2)
-        if refthk<1.: self.norm= lambda px: profit.reflect(diel['ksi'](px))
-        else: self.norm= lambda px: profit.plate(px,[diel['ksio2'](px),diel['ksi'](px)],[refthk])
 
+    def norm(self,px):
+        from scanner import profit
+        bid='b%.1f-%.1f'%(px[0],px[-1])
+        if not bid in self.normtab:
+            if refthk<1.: self.normtab[bid] = profit.reflect(diel['ksi'](px))
+            else: self.normtab[bid] = profit.plate(px,[diel['ksio2'](px),diel['ksi'](px)],[refthk])
+        return self.normtab[bid]
+        
     def corrdark(self,dark):
         for i in range(len(self.bands)):
             if i>=len(dark.bands): break
@@ -827,7 +834,7 @@ class Wafer():
                     if not label in self.names: continue
                     sm=self.names[label]
                     try:
-                        sm.thick[vals[1].strip()]=float(vals[2])
+                        sm.thick[vals[1 ].strip()]=float(vals[2])
                         k+=1
                     except:
                         print("not parsing "+l)
