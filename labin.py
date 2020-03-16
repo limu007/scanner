@@ -613,7 +613,7 @@ class ocean(specscope):
         import jnius_config
         jnius_config.set_classpath('.', rc.java_ooipath+"OmniDriver.jar")
         from jnius import autoclass
-        wrap=autoclass('com.oceanoptics.omnidriver.api.wrapper.Wrapper')
+        wrap=autoclass('com.oceanoptics.omnidriver.api.wrapper.Wrapper')    
         return wrap()
 
     def __init__(self):
@@ -685,7 +685,7 @@ class oceanjaz(ocean):
         print
         iprev=None
         self.intime=integ
-        
+        self.chanene=[]
         for i in range(len(self.chord)):
             self.device.setIntegrationTime(0, int(i), 1000*self.intime)
             self.device.setScansToAverage(0, int(i), aver)

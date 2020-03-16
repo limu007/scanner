@@ -5,8 +5,8 @@ class specscope3d(specscope):
         scale=1
         gxmax=200
         gymax=180
-        gzmax=30
-        gzmin=4
+        gzmax=3
+        gzmin=0.5
 
         def awrite(self,comm):
             self.ard.write((comm+"\r\n").encode())
@@ -57,17 +57,23 @@ class specscope3d(specscope):
                 self.awrite("G1 X%.1f Y%.1f"%(self.gx,self.gy))
                 return self.acomm(True)
 
-        def focus(self,zpos=10):
+        def focus(self,zpos=0,zstep=.2,rep=0,integ=10,factval=[1,0,0]):
             
             prof=[]
-            self.setup(prange=[200,400],integ=10,aver=10)
+            self.setup(prange=[1.2,2.2],integ=integ,aver=10)
+            self.intfact=factval
             while (zpos>self.gzmin) and (zpos<self.gzmax):
                 self.awrite("G1 Z%.1f"%zpos)
-                self.measure()
-                prof.append([zpos,self.last.sum()])
+                last=self.measure()
+                if rep>1:
+                    prof.append([zpos]+list(last.sum(1)))
+                else:
+                    prof.append([zpos,last.sum()])
+                zpos+=zstep
                 if prof[-1][1]<prof[0][1]*0.8: break
             import numpy as np
             prof=np.array(prof)
+            if rep>0: return prof
             idx=np.polyfit(prof[:,0],prof[:,1],4)
             ip=prof[:,1].argmax()
             fx=np.r_[prof[0][i-2]:prof[0][i+3]:100j]
