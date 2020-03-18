@@ -495,7 +495,7 @@ class Scan(HasTraits):
         if self.since_calib>0 and rc.save_period>0 and self.since_calib%rc.save_period==0:
             if exper.sname!="": exper._saveall_fired()
         point=self.program.pop(0)
-        if hasattr(self.instr,'ard'):
+        if hasattr(self.instr,'ard'): #arduino/velleman
             if hasattr(self.instr,'goto'):
                 self.instr.goto(point[0],point[1])
             else:
@@ -518,6 +518,13 @@ class Scan(HasTraits):
         #self.cpos=str(list(self.actpos))
         for k in self.exelist.keys():
             self.exelist[k].acquire=True
+
+    def height_calib(self,rep=1):
+        rep=[]
+        while self.npoints>0:
+            self.next_point()
+            rep.append(self.instr.focus(rep=rep,factval=[]))
+
 
 #   def run_scan(self):
 #        #obsolete
@@ -556,7 +563,7 @@ class AcquisitionThread(Thread):
         #from numpy import array,iterable
         while not self.wants_abort:
             self.n_img += 1
-            if hasattr(self,"prepare"): self.prepare()
+            if hasattr(self,"prepare"): self.prepare() #next point
             spect=self.acquire(self.experiment)
             if not iterable(spect):
                 print("acquisition failed")

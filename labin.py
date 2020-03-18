@@ -723,7 +723,7 @@ class oceanjaz(ocean):
             self.device.setIntegrationTime(0, int(i), int(1000*self.intime*self.intfact[i]))
             self.device.setScansToAverage(0, int(i), int(aver))
     
-    def dark(self,specsel=0):
+    def get_dark(self,specsel=0):
         self.device.setStrobeEnable(specsel,0)
         self.dark=self.measure()
         self.device.setStrobeEnable(specsel,1)

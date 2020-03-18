@@ -57,28 +57,42 @@ class specscope3d(specscope):
                 self.awrite("G1 X%.1f Y%.1f"%(self.gx,self.gy))
                 return self.acomm(True)
 
-        def focus(self,zpos=0,zstep=.2,rep=0,integ=10,factval=[1,0,0]):
-            
+        def focus(self,zpos=0,zstep=.2,rep=0,integ=10,factval=[1,0,0],minval=1e5,bord=10):
+            '''rep=1: sum all channels
+               rep=2: individual channels
+            '''
             prof=[]
-            self.setup(prange=[1.2,2.2],integ=integ,aver=10)
-            self.intfact=factval
+            self.intime=integ
+            import numpy as np
+            #self.setup(prange=[1.2,2.2],integ=integ,aver=10)
+            if len(factval)>0: self.intfact=factval
             while (zpos>self.gzmin) and (zpos<self.gzmax):
                 self.awrite("G1 Z%.1f"%zpos)
                 last=self.measure()
+                if np.iterable(self.dark): last-=self.dark
+                if bord>0: last=last[:,bord:-bord]
+                if last.sum()<minval: #no signal here
+                    break
                 if rep>1:
                     prof.append([zpos]+list(last.sum(1)))
                 else:
                     prof.append([zpos,last.sum()])
                 zpos+=zstep
-                if prof[-1][1]<prof[0][1]*0.8: break
-            import numpy as np
-            prof=np.array(prof)
-            if rep>0: return prof
-            idx=np.polyfit(prof[:,0],prof[:,1],4)
-            ip=prof[:,1].argmax()
-            fx=np.r_[prof[0][i-2]:prof[0][i+3]:100j]
+                #if prof[-1][1]<prof[0][1]*0.8: break
+            prof=np.array(prof).T
+            if rep>0 or len(prof[0])<5: return prof #no fitting
+            k=1
+            idx=np.polyfit(prof[0],prof[k],4)
+            ip=prof[k].argmax()
+            fx=np.r_[prof[0][ip-2]:prof[0][ip+3]:100j]
             self.zbest=fx[np.polyval(idx,fx).argmax()]
             return self.acom()
+
+        def prepare(self):
+            self.setup([1.1,2.3],10)
+            self.dark=self.measure().copy() 
+            self.ahome()
+            #[np.roots(np.polyder(np.polyfit(prof[0],p,4))) for p in prof[1:3]]
 
         def ruler(self,axis=1,stp=1,nstp=60,ichan=0):
             import numpy as np
