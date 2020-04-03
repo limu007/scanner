@@ -32,8 +32,11 @@ spectr_nb_trials=3
 polar_stage=False
 
 xy_cent=[100 ,60]
-refer_pos=[5,50]
-xy_size=[180,145]
+xy_zslope=[4.05994822e+00, 1.02355761e-03, 5.52141437e-04] #linear
+#refer_pos=[5,50]
+refer_pos=[1,18,1.145]
+#xy_size=[180,145]
+xy_size=[200,145]
 scan_axes_order=0 # for rot. stage 0= radial first, 1=rotate first
                   # for lin. stage 0= upper first, 1=lower first
 base_xdir=1 # -1 for xy-scanner, +1 for rotation stage

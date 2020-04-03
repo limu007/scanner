@@ -38,8 +38,8 @@ from pyface.progress_dialog import ProgressDialog as ProgressBar
 matplotlib.use('QT4Agg')
 from matplotlib.figure import Figure
 
-from scanner import labin,labin3d
-from scanner import labrc as rc
+from . import labin,labin3d
+from . import labrc as rc
 
 
 
@@ -342,7 +342,7 @@ class Scan(HasTraits):
         sel*=self.program[1]<rc.xy_size[1]
         self.program=list(self.program[:,sel].T)
         if self.callast:
-            self.program.append([int(a) for a in rc.refer_pos])
+            self.program.append([int(a) for a in rc.refer_pos[:2]])
         self.npoints=len(self.program)
         if 'plan' in self.exelist: #vykreslit
             self.exelist['plan'].experiment.display("%i points out of accessible area"%(len(sel)-sum(sel)))
@@ -359,9 +359,10 @@ class Scan(HasTraits):
     def _srefer_fired(self):
         #self.instr.goto(rc.refer_pos[0],rc.refer_pos[1]) #to be tested!!
         from numpy import array
-        self.instr.goto(*rc.refer_pos)#_gopos_fired()
-        self.actpos=rc.refer_pos
+        self.instr.goto(rc.refer_pos[0],rc.refer_pos[1],rc.refer_pos[2])#_gopos_fired()
+        self.actpos=rc.refer_pos[:2]
         self.disp_pos()
+        #self.instr.goto(rc.refer_pos[0],rc.refer_pos[1],self.instr.gz)
 
     def _gopos_fired(self):#_cpos_changed(self):
         #modified center position

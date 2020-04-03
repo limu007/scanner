@@ -1,18 +1,21 @@
-from scanner.labin import specscope,webocean,uniocean,oceanjaz
-from scanner import labrc as rc
+from .labin import specscope,webocean,uniocean,oceanjaz
+from . import labrc as rc
 
 class specscope3d(specscope):
         scale=1
         gxmax=200
         gymax=180
-        gzmax=3
-        gzmin=0.5
+        gzmax=6
+        gzmin=2.5
 
         def awrite(self,comm):
             self.ard.write((comm+"\r\n").encode())
             
         def __init__(self, *args, **kwargs):
                 specscope.__init__(self, *args, **kwargs)
+                self.gx=0
+                self.gy=0
+                self.gz=self.gzmin
 
         def adrive(self,peri=10,gap=0):
                 import serial
@@ -51,10 +54,26 @@ class specscope3d(specscope):
                 if loud>=0: return self.acomm(True)
                 return []
 
-        def goto(self,xpos,ypos):
+        def goto(self,xpos,ypos,zpos=0):
+                if self.gz<self.gzmin:
+                    self.awrite("G1 X%.1f Y%.1f Z%.2f"%(self.gx,self.gy,self.gzmin))
                 if xpos>=0 and xpos<=self.gxmax: self.gx=xpos
                 if ypos>=0 and ypos<=self.gymax: self.gy=ypos
-                self.awrite("G1 X%.1f Y%.1f"%(self.gx,self.gy))
+                if len(rc.xy_zslope)>2:
+                    if zpos>0: 
+                        self.gz=zpos
+                        self.awrite("G1 X%.1f Y%.1f"%(self.gx,self.gy))
+                        self.awrite("G1 X%.1f Y%.1f Z%.2f"%(self.gx,self.gy,self.gz))
+                    else:
+                        self.gz=rc.xy_zslope[0]+rc.xy_zslope[1]*self.gx+rc.xy_zslope[2]*self.gy
+                        if len(rc.xy_zslope)>5:
+                            self.gz+=rc.xy_zslope[3]*self.gx**2+rc.xy_zslope[4]*self.gy**2+rc.xy_zslope[5]*self.gx*self.gy
+                        if self.gz<self.gzmin: self.gz=self.gzmin
+                        if self.gz>self.gzmax: self.gz=self.gzmax
+                        self.awrite("G1 X%.1f Y%.1f Z%.2f"%(self.gx,self.gy,self.gz))
+
+                else:
+                    self.awrite("G1 X%.2f Y%.2f"%(self.gx,self.gy))
                 return self.acomm(True)
 
         def focus(self,zpos=0,zstep=.2,rep=0,integ=10,factval=[1,0,0],minval=1e5,bord=10):
@@ -68,7 +87,7 @@ class specscope3d(specscope):
             if len(factval)>0: self.intfact=factval
             while (zpos>self.gzmin) and (zpos<self.gzmax):
                 self.awrite("G1 Z%.1f"%zpos)
-                last=self.measure()
+                last=self.measure().copy()
                 if np.iterable(self.dark): last-=self.dark
                 if bord>0: last=last[:,bord:-bord]
                 if last.sum()<minval: #no signal here
@@ -79,6 +98,7 @@ class specscope3d(specscope):
                     prof.append([zpos,last.sum()])
                 zpos+=zstep
                 #if prof[-1][1]<prof[0][1]*0.8: break
+            self.gz=self.gzmax
             prof=np.array(prof).T
             if rep>0 or len(prof[0])<5: return prof #no fitting
             k=1
@@ -129,7 +149,20 @@ class specscope3d(specscope):
                 if hasattr(self,"ard") and self.ard!=None: 
                     self.ard.close()
                     del self.ard
-                    
+
+def zcalib(self,pos,factval=[1,1,0]):
+    import numpy as np
+    self.goto(pos[0],pos[1])
+    prof=self.focus(self.gzmin+0.1,0.1,rep=2,integ=10,factval=factval,minval=10,bord=100)
+    idx=[np.polyfit(prof[0],p,4) for p in prof[1:sum(factval)+1]]
+    roughpos=[prof[0][p.argmax()] for p in prof[1:sum(factval)+1]]
+    pox=[np.roots(np.polyder(p)) for p in idx]
+    vax=[np.polyval(idx[i],pox[i]).real.argmax() for i in range(len(pox))]
+    maxpos=[pox[i][vax[i]].real for i in range(len(pox))]
+    chis=[sum((prof[i+1]-np.polyval(idx[i],prof[0]))**2)/prof[i+1].var()/len(prof[0]) for i in range(len(idx))]
+    sigs=pox=[1/np.polyval(np.polyder(np.polyder(idx[i])),maxpos[i]) for i in range(len(idx))]
+    return maxpos,chis,sigs,roughpos
+
 from scanner.comband import gettrans
 #from scanner.labin import webfetch
 
@@ -141,6 +174,10 @@ class ocean3d(oceanjaz,specscope3d):
             oceanjaz.__init__(self, *args, **kwargs)
             rep=self.adrive()
             #print(rep[-1])
+            self.gx=0
+            self.gy=0
+            self.gz=self.gzmin
+
 
         def fastline(self,nstep,dstep=10,axe='X',mchan=0,bin=1,imin=None,imax=None):
             import numpy as np
