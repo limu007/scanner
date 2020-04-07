@@ -678,7 +678,7 @@ class Spectrac(HasTraits):
                 #self.instr=labin3d.webocean3d(path="http://localhost:%i/?exp="%self.port,chan=rc.chan_sel)
                 self.instr=labin3d.ocean3d()
                 if self.instr.dsize<=0:
-                    message(" turn on the spectrometer, please ", title = 'User request')
+                    message("Turn on the spectrometer, please ", title = 'User request')
                     self.instr=None 
                     return
                 self.instr.gxmax,self.instr.gymax=rc.xy_size
