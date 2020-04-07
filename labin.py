@@ -425,161 +425,6 @@ class specscope(object):
                 dela=(dis//peri+1)*peri-dis-0.5
                 if dela<0: dela=0.1
 
-    def scan_save(self,xstep=-500,ystep=500,xcnt=50,ycnt=50,radius=0,oname='C:\\Users\\Lenovo\\Documents\\Data\\quad_line',
-                center=False,format='txt',control=None,swapaxes=False,centerfirst=False,debug=False,returnlast=False,recalib=0):
-            ''' 2-d scanning of the sample - saving each row in separate file (given by oname)
-            if radius>0: X-Y coverage of circular wafer
-                now radius in stepper counts
-            if swapaxes: scanning second dir. first
-            if centerfirst: just one point in first line (center)
-            if returnlast: return to original position after scan
-            '''
-            from numpy import array,save,zeros,savetxt
-            from math import sqrt
-            import sys
-            from time import sleep
-
-            #global gx,gy
-            self.gx,self.gy=0,0
-            global meas_line
-            ofile=None
-            if format=='txt': #hack for saving in text format
-                def save(a,b):
-                    ouf=open(a+".txt","w")
-                    if len(b.shape)>1 and min(b.shape)>1:
-                        ouf.write("#"+"  ".join(["pnt%i"%i for i in range(1,len(b)+1)])+'\n') #writing header
-                    savetxt(ouf,b.transpose(),fmt="%8.5f")
-                    ouf.close()
-            elif format=='pts':
-                ofile=open(oname,"w")
-                ofile.write("[%i,%i]\n"%(self.gx,self.gy))
-            #rate=newrate
-            if swapaxes: xdir,ydir=2,1
-            else: xdir,ydir=1,2
-            if control:
-                control['size']=(xcnt,ycnt)
-                control['nx']=xcnt #is OK for round samples ??
-                control['ny']=ycnt
-                if 'stop' in control: del control['stop']
-            pos_cent=[0,0]
-            pos_beg=[self.gx,self.gy]
-            if radius>0: # round sample
-                if center: self.rate(ydir,-radius)
-                if radius<ycnt*ystep-1: ycnt=radius//ystep+1
-                if radius<xcnt*xstep-1: xcnt=radius//xstep+1
-                xmin,xmax=-xcnt+1,xcnt
-                ymin,ymax=-ycnt+1,ycnt
-            else:
-                xmin,xmax=0,xcnt
-                ymin,ymax=0,ycnt
-            if testonly: print("scan in range %i-%i/%i-%i"%(xmin,xmax,ymin,ymax))
-            nmeas=0
-            step_virtual=[0,0]
-            for j in range(ymin,ymax):
-                    meas_line=[]
-                    pos_line=[]
-                    k=0
-                    for i in range(xmin,xmax):
-                        if ((radius>0) and ((i*xstep-pos_cent[0])**2+(j*ystep-pos_cent[1])**2)>radius**2) or (centerfirst and i>xmin):
-                            meas_line.append(zeros(self.pixtable.shape)) # not measuring at this point - empty data
-                            step_virtual[xdir-1]+=xstep
-                            continue
-                        if k!=0:
-                            step_virtual[xdir-1]+=xstep
-                            #print('going '+str(xdir)+' '+str(xstep))
-                        else: k=1  # first point in the line
-                        if step_virtual[xdir-1]!=0: #realize all delayed moves
-                            self.rate(xdir,step_virtual[xdir-1])
-                        if step_virtual[ydir-1]!=0: #realize all delayed moves
-                            self.rate(ydir,step_virtual[ydir-1])
-                        step_virtual=[0,0]
-                        if control and 'stop' in control: break
-                        ############ measurement #######################
-                        meas_line.append(self.result())
-                        nmeas+=1
-                        pos_line.append("[%i,%i]"%(self.gx,self.gy))
-                        if recalib>0 and nmeas%recalib==0: # go to calibration point
-                            pos_act=[self.gx,self.gy]
-                            self.rate(1,pos_calib[0]-pos_act[0])
-                            self.rate(2,pos_calib[1]-pos_act[1])
-                            #self.rate(xdir,pos_calib[0]-pos_act[0])
-                            #self.rate(ydir,pos_calib[1]-pos_act[1])
-                            newflat=self.measure()
-                            if self.flat!=None:
-                                ratio=newflat/self.flat
-                                print("recalib. by fact. %.3f"%ratio.mean())
-                            self.flat=newflat
-                            pos_line.append("[%i,%i]"%(self.gx,self.gy))
-                            self.rate(1,-pos_calib[0]+pos_act[0])
-                            self.rate(2,-pos_calib[1]+pos_act[1])
-                        #print('just measured %i %i'%(i,j))
-                        if control:
-                            if 'wait' in control: sleep(control['wait'])
-                            control['x']=i
-                            control['y']=j
-                            control['gx']=self.gx
-                            control['gy']=self.gy
-                            if rc.debug==2: print("at pos %i / %i"%(i,j))
-                            elif rc.debug>2: print("at pos %i / %i"%(self.gx,self.gy))
-                            if 'meas_evt' in control: control['meas_evt'].set() #starting everything that should come with new measurement
-                            if 'queue' in control: control['queue'].put('measured %i %i'%(i,j)) #synchronization for GUI
-                            if 'anal_evt' in control: # waiting for analysis to end
-                                control['anal_evt'].wait()
-                                control['anal_evt'].clear()
-                            if 'stop' in control: break
-                            if 'refer' in control and control['refer']==1:
-                                if j==-ycnt+1: #save calibration
-                                    if self.flat!=None: self.flat*=array(meas_line[-1])
-                                    else: self.flat=array(meas_line[-1])
-                                    self.last=1
-                                    control['refer']==0
-                            if 'anal' in control: control['anal']() #calling analysis directly, not multitasking
-                            if 'meas_evt' in control: control['meas_evt'].clear()
-                            if rc.single_central_pt and (j==0): break
-                    if control and 'stop' in control:
-                        print('stop forced, leaving')
-                        break #leaving
-                    if j%2==1:
-                        meas_line=meas_line[::-1]
-                        #print('line %i inverted'%j)
-                    if ofile!=None:
-                        ofile.write("\t".join(pos_line)+"\n")#self.config.Material.decode('ascii')!='simu':
-                    else:
-                        if radius<=0:
-                            save(oname+"%03i"%(j+1),array(meas_line))
-                        else:
-                            save(oname+"%03i"%(j+ycnt),array(meas_line))
-                    if radius<0: #nevim proc to tu je
-                        if j>=radius: break
-                        if j<-radius: continue
-                        self.rate(xdir,xstep*(int(sqrt(radius**2-(j+1)**2))-int(sqrt(radius**2-j**2))))
-                    #print("now next line")
-                    if j<ycnt-1:
-                        step_virtual[ydir-1]+=ystep
-                    if not(rc.polar_stage and rc.single_central_pt and (j==0)):
-                        xstep=-xstep
-            if control:
-                if 'meas_evt' in control:
-                    control['stop']=2
-                    control['meas_evt'].set()
-                if 'queue' in control: control['queue'].put('finished')
-                if 'return' in control: # return to the starting position
-                    print('returning from pos %i, %i (%i, %i)'%(i,j,xmin,ymin))
-                    self.rate(ydir,-ystep*(j-ymin))
-                    ymod=rc.single_central_pt and 1 or 0
-                    if (j-ymin)%2==ymod: self.rate(xdir,xstep*(i-xmin),wait=-1) #odd number of x-scans
-                    control['x']=xmin
-                    control['y']=ymin
-                    xstep=-xstep
-            if hasattr(self,'pixtable') and ofile==None: #saving calibration data
-                if self.flat==None: save(oname+"calib",self.pixtable)
-                else: save(oname+"calib",array([self.pixtable,self.flat]))
-            if returnlast:
-                self.rate(1,pos_beg[0]-self.gx)
-                self.rate(2,pos_beg[1]-self.gy)
-            if ofile!=None:
-                if returnlast:  ofile.write("[%i,%i]\n"%(self.gx,self.gy))
-                ofile.close()
 
 class ocean(specscope):
     '''developped and tested for JAZ/NIRquest
@@ -611,15 +456,20 @@ class ocean(specscope):
         os.environ['PATH']+=";"+rc.jrepath+"\\server"
         os.environ['JAVA_HOME']=rc.jdkpath
         import jnius_config
-        jnius_config.set_classpath('.', rc.java_ooipath+"OmniDriver.jar")
+        if not jnius_config.vm_running:
+            jnius_config.set_classpath('.', rc.java_ooipath+"OmniDriver.jar")
         from jnius import autoclass
         wrap=autoclass('com.oceanoptics.omnidriver.api.wrapper.Wrapper')    
         return wrap()
 
-    def __init__(self):
-        
+    def __init__(self,full=True):
         self.device = self.get_nius()
-        self.device.openAllSpectrometers()
+        if not full: return 
+        cnt=self.device.openAllSpectrometers()
+        if cnt==0:
+            self.dsize=-1 
+            self.device.closeAllSpectrometers()
+            return None
         self.dsize=self.device.getNumberOfPixels(0)
         self.name=self.device.getFirmwareModel(0)
 
