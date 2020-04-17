@@ -205,6 +205,7 @@ class Experiment(HasTraits):
             rc.use_shut=0
         else:
             message(" block the light beam, please ", title = 'User request')
+        self.paren.status_string="dark acquisition"
         self.instr.dark=self.instr.result(sub_dark=False,div_flat=False,smooth=self.smooth,maxit=-1) #no correction/calibration
         self.paren.status_string="dark curr. saved"
         if self.shut:
@@ -214,6 +215,7 @@ class Experiment(HasTraits):
     def _refer_fired(self,interrupt=True):
         if self.paren.acquisition_thread and interrupt and self.paren.acquisition_thread.isAlive():
             self.paren.acquisition_thread.wants_abort = True
+        self.paren.status_string="calibration running"
         self.paren.status_string="measuring reference sample"
         from numpy import any,iterable,percentile
         #if hasattr(self.instr,'ysel'): del self.instr.ysel
@@ -861,15 +863,20 @@ class Analyse(HasTraits):
     #erange = grange
     elow = Float(0.9, label="from", desc="lower energy band")
     ehigh = Float(5.5, label="to", desc="upper energy band")
-    code = Code("return xdat.mean(),ydat.mean()")
+    chuse = Int(1, label="Channel to use")
+    smnum = Int(0, label="Sample number to use")
+    code = Code("results['out']=[xdat.mean(),ydat.mean()]")
     run = Button('Eval')
     debug = Button('Debug')
     res = Button('Reset')
+    map = Button('Map')
     output = String("here comes the data",label="Output")
     view = View(
-                Item('erange', editor=BoundsEditor(low_name = 'elow', high_name = 'ehigh')),
+                HGroup(Item('erange', editor=BoundsEditor(low_name = 'elow', high_name = 'ehigh')),
+                    Item('chuse'),Item('smnum')),
                 Item('code',show_label=False),
-                HGroup(Item('run',show_label=False),Item('res',show_label=False),Item('debug',show_label=False),),
+                HGroup(Item('run',show_label=False),Item('res',show_label=False),Item('debug',show_label=False),
+                    Item('map',show_label=False),),
                 Item('output',show_label=False,style='readonly')
                 )#, enabled_when="config!=None")
     calculate = Event
@@ -877,12 +884,32 @@ class Analyse(HasTraits):
     paren=None
     vals=[]
 
-    def evalme(self):
-        xdat=self.instr.pixtable
+    def evalme(self,ydat=None): 
+        '''not working for multichannel
+        '''
+        if hasattr(self,'instr'):
+            if len(self.instr.chanene)>0:
+                if self.chuse>0:
+                    if self.chuse>len(self.instr.chanene): self.chuse=1
+                    xdat=self.instr.chanene[self.chuse-1]
+                    ydat=ydat[self.chuse-1]
+            else:
+                xdat=self.instr.pixtable
+                if not iterable(ydat): ydat=self.instr.last
+        else:
+            if hasattr(self.paren,'wafer'):
+                if self.smnum>=len(self.paren.wafer.samps): self.smnum=0
+                samp=self.paren.wafer.samps[self.smnum]
+                if self.chuse>len(samp.bands): self.chuse=1
+                if self.chuse>0: xdat=samp.bands[self.chuse-1].ix
+                if not iterable(ydat): ydat=samp.bands[self.chuse-1].iy
+                else: ydat=ydat[self.chuse-1]
+
         sel=(xdat>=self.elow)*(xdat<=self.ehigh)
-        ydat=self.instr.last
         if not iterable(ydat) or len(ydat)!=len(sel): return 0
-        return self.func(xdat[sel],ydat[sel])
+        odict={'xdat':xdat[sel],'ydat':ydat[sel],'results':{}}
+        exec(self.func,odict)
+        return odict['results']
 
     def _reset_fired(self):
         self.vals=[]
@@ -897,16 +924,31 @@ class Analyse(HasTraits):
     def _run_fired(self):
         #rep=exec(self.code) not working
         imp=self.code
-        imp="def runme(xdat,ydat):\n    "+"\n    ".join(self.code.split("\n"))
-        open("analme.py","w").write(imp)
-        if 'analme' in locals():
-            from imp import reload
-            del self.func
-            reload(analme)
-        else: import analme
-        self.func=analme.runme
-        self.output=str(self.evalme())
+        #imp="def runme(xdat,ydat):\n    "+"\n    ".join(self.code.split("\n"))
+        #open("analme.py","w").write(imp)
+        #if 'analme' in locals():
+        #    from imp import reload
+        #    del self.func
+        #    reload(analme)
+        #else: import analme
+        #exec(imp)
+        self.func=compile(imp,'compiled','exec')
+        self.output=str(self.evalme()['out'])
         #self.output="Evaluation failed"
+
+    def _map_fired(self):
+        self.func=compile(self.code,'compiled','exec')
+        xlst,ylst=[],[]
+        self.vals=[]
+        for n in self.paren.experiment.stack.keys():
+            spec=self.paren.experiment.stack[n]
+            try:
+                pos=[int(float(i)) for i in n.split('_')[1:]]
+                xlst.append(pos[0])
+                ylst.append(pos[1])
+            except:
+                continue
+            self.vals.append(self.evalme(spec)['out'])
 
     def _calculate_fired(self):
         if self.func!=None:
