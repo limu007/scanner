@@ -605,6 +605,18 @@ class oceanjaz(ocean):
         self.last=data
         return data
 
+    def makesamp(self,data=None):
+        '''creates Sample structure'''
+        #from . import reband# import Sample
+        from numpy import concatenate,iterable
+        if not iterable(data): data=self.last
+        try:
+            import reband
+        except:
+            from scanner import reband
+        return reband.Sample(None,data=concatenate([[self.chanene[i],data[i]] for i in range(len(self.chanene))]))
+    
+
 
 class avantes(specscope):
     '''developped and tested for AvaSpec 3648
@@ -1254,16 +1266,6 @@ class uniocean(webocean):
             if id<len(self.chanval):
                 self.chanval[id,:len(pixval)]=pixval
         return self.chanval
-    
-    def makesamp(self,data):
-        '''creates Sample structure'''
-        #from . import reband# import Sample
-        from numpy import concatenate
-        try:
-            import reband
-        except:
-            from scanner import reband
-        return reband.Sample(None,data=concatenate([[self.chanene[i],data[i]] for i in range(len(self.chanene))]))
     
     def setflat(self,minval=3,perc=3,fresh=True,smooth=30):
         '''calculates tranformation table

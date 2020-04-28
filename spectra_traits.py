@@ -575,9 +575,10 @@ class AcquisitionThread(Thread):
             if self.experiment.refermat!='unity':
                 instr=self.experiment.instr
                 if instr.samp!=None:
-                   instr.samp.calib()
-                   instr.samp.prof=instr.samp.trans(instr.transtable,instr.ysel,lev=rc.band_minlev,ref=instr.flat)
-                   spect=instr.samp.prof.vals
+                    instr.samp.calib()
+                    if iterable(instr.transtable):
+                        instr.samp.prof=instr.samp.trans(instr.transtable,instr.ysel,lev=rc.band_minlev,ref=instr.flat)
+                    spect=instr.samp.prof.vals
                 else:
                     print("sample not created")
             self.display('%d spectra captured' % self.n_img)
@@ -838,6 +839,7 @@ class Spectrac(HasTraits):
                 if selpix[-1]<len(spect)-1: spect[selpix[-1]+1:]=spect[selpix[-1]]
             else:
                 print("problem combining:no pict selected")
+        self.instr.samp=self.instr.makesamp(spect)
         return(spect)
 
     def get_match(self, caltab):
@@ -865,18 +867,22 @@ class Analyse(HasTraits):
     ehigh = Float(5.5, label="to", desc="upper energy band")
     chuse = Int(1, label="Channel to use")
     smnum = Int(0, label="Sample number to use")
-    code = Code("results['out']=[xdat.mean(),ydat.mean()]")
+    doplot = Bool(False,label="Show graph")
+    code = Code("return [xdat.mean(),ydat.mean()]")
     run = Button('Eval')
     debug = Button('Debug')
     res = Button('Reset')
+    fname = File('')
+    load = Button('Load')
+    save = Button('Save')
     map = Button('Map')
     output = String("here comes the data",label="Output")
     view = View(
                 HGroup(Item('erange', editor=BoundsEditor(low_name = 'elow', high_name = 'ehigh')),
-                    Item('chuse'),Item('smnum')),
+                    Item('chuse'),Item('smnum'),Item('doplot')),
                 Item('code',show_label=False),
                 HGroup(Item('run',show_label=False),Item('res',show_label=False),Item('debug',show_label=False),
-                    Item('map',show_label=False),),
+                    Item('map',show_label=False),Item('fname',show_label=False),Item('load',show_label=False),Item('save',show_label=False),),
                 Item('output',show_label=False,style='readonly')
                 )#, enabled_when="config!=None")
     calculate = Event
@@ -887,6 +893,7 @@ class Analyse(HasTraits):
     def evalme(self,ydat=None): 
         '''not working for multichannel
         '''
+        if not iterable(ydat): ydat=self.instr.last
         if hasattr(self,'instr'):
             if len(self.instr.chanene)>0:
                 if self.chuse>0:
@@ -895,7 +902,6 @@ class Analyse(HasTraits):
                     ydat=ydat[self.chuse-1]
             else:
                 xdat=self.instr.pixtable
-                if not iterable(ydat): ydat=self.instr.last
         else:
             if hasattr(self.paren,'wafer'):
                 if self.smnum>=len(self.paren.wafer.samps): self.smnum=0
@@ -908,22 +914,39 @@ class Analyse(HasTraits):
         sel=(xdat>=self.elow)*(xdat<=self.ehigh)
         if not iterable(ydat) or len(ydat)!=len(sel): return 0
         odict={'xdat':xdat[sel],'ydat':ydat[sel],'results':{}}
+        if hasattr(self.instr,"samp"): odict['samp']=self.instr.samp
         exec(self.func,odict)
         return odict['results']
 
     def _reset_fired(self):
         self.vals=[]
 
+    def _load_fired(self):
+        import os
+        if os.path.exists(self.fname):
+            self.code=open(self.fname).read()
+            self.status_string="Code loaded"
+        else:
+            self.status_string="File not found"
+        
+        
+    def _save_fired(self):
+        ofile=open(self.fname,"wb")
+        ofile.write(self.code.encode("u8"))
+        self.status_string="Code saved"
+        ofile.close()
+
     def _debug_fired(self):
         try:
             self.output=str(eval(self.code))
         except:
-            self.output="Error in expression"
+            self.status_string="Error in expression"
         self.vals=[]
 
     def _run_fired(self):
         #rep=exec(self.code) not working
         imp=self.code
+        imp=imp.replace("return ","results['out']=")
         #imp="def runme(xdat,ydat):\n    "+"\n    ".join(self.code.split("\n"))
         #open("analme.py","w").write(imp)
         #if 'analme' in locals():
@@ -937,7 +960,9 @@ class Analyse(HasTraits):
         #self.output="Evaluation failed"
 
     def _map_fired(self):
-        self.func=compile(self.code,'compiled','exec')
+        imp=self.code
+        imp=imp.replace("return ","results['out']=")
+        self.func=compile(imp,'compiled','exec')
         xlst,ylst=[],[]
         self.vals=[]
         for n in self.paren.experiment.stack.keys():
@@ -1318,6 +1343,7 @@ class ControlPanel(HasTraits):
     def result_update(self):
         """plots results of analysis"""
         from numpy import arange,iterable
+        if not(self.analyse.doplot): return
         if iterable(self.analyse.vals):
             vals=self.analyse.vals
             nvals=len(vals)
