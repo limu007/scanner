@@ -346,11 +346,14 @@ class Scan(HasTraits):
         if self.callast:
             self.program.append([int(a) for a in rc.refer_pos[:2]])
         self.npoints=len(self.program)
+        
         if 'plan' in self.exelist: #vykreslit
+            from scanner import reband
             self.exelist['plan'].experiment.display("%i points out of accessible area"%(len(sel)-sum(sel)))
             print("plotting %i points (%i removed)"%(len(self.program),len(sel)-sum(sel)))
             self.exelist['plan'].design_show(self.program)
             self.exelist['plan'].experiment.clear_stack()
+            self.exelist['plan'].wafer=reband.Wafer("",[])
         self.since_calib=0
 
     def disp_pos(self):
@@ -702,7 +705,7 @@ class Spectrac(HasTraits):
         #self.instr.config.Material=b'simu'
         self.instr.samp=None
         self.exper.display("setup ok [%i pixels] ..."%len(self.pixels))
-        self.norm=(1,1,1)
+        self.norm=rc.chan_equal
         self.paren.status_string="now calibrate [Experiment/Dark + Reference]"
         self.chanlist=[('%.2f-%.2f eV'%(c.min(),c.max())) for c in self.instr.chanene]
         self.ready=True
@@ -840,6 +843,8 @@ class Spectrac(HasTraits):
             else:
                 print("problem combining:no pict selected")
         self.instr.samp=self.instr.makesamp(spect)
+        self.instr.samp.laystruct=experiment.material
+        if hasattr(self.paren,'wafer'): self.paren.wafer.samps.append(self.instr.samp)
         return(spect)
 
     def get_match(self, caltab):
@@ -865,13 +870,14 @@ class Analyse(HasTraits):
     #erange = grange
     elow = Float(0.9, label="from", desc="lower energy band")
     ehigh = Float(5.5, label="to", desc="upper energy band")
-    chuse = Int(1, label="Channel to use")
+    chuse = Enum([1,2,3], label="Channel to use")
     smnum = Int(0, label="Sample number to use")
     doplot = Bool(False,label="Show graph")
     code = Code("return [xdat.mean(),ydat.mean()]")
     run = Button('Eval')
     debug = Button('Debug')
     res = Button('Reset')
+    variab = String('thick',label='What to show')
     fname = File('')
     load = Button('Load')
     save = Button('Save')
@@ -882,7 +888,8 @@ class Analyse(HasTraits):
                     Item('chuse'),Item('smnum'),Item('doplot')),
                 Item('code',show_label=False),
                 HGroup(Item('run',show_label=False),Item('res',show_label=False),Item('debug',show_label=False),
-                    Item('map',show_label=False),Item('fname',show_label=False),Item('load',show_label=False),Item('save',show_label=False),),
+                    Item('map',show_label=False),Item('variab')),
+                HGroup(Item('fname',show_label=False),Item('load',show_label=False),Item('save',show_label=False),),
                 Item('output',show_label=False,style='readonly')
                 )#, enabled_when="config!=None")
     calculate = Event
@@ -902,8 +909,8 @@ class Analyse(HasTraits):
                     ydat=ydat[self.chuse-1]
             else:
                 xdat=self.instr.pixtable
-        else:
-            if hasattr(self.paren,'wafer'):
+        else: #processing loaded data
+            if hasattr(self.paren,'wafer') and not iterable(ydat):
                 if self.smnum>=len(self.paren.wafer.samps): self.smnum=0
                 samp=self.paren.wafer.samps[self.smnum]
                 if self.chuse>len(samp.bands): self.chuse=1
@@ -960,20 +967,37 @@ class Analyse(HasTraits):
         #self.output="Evaluation failed"
 
     def _map_fired(self):
-        imp=self.code
-        imp=imp.replace("return ","results['out']=")
-        self.func=compile(imp,'compiled','exec')
-        xlst,ylst=[],[]
+        self.vpos=[]
         self.vals=[]
-        for n in self.paren.experiment.stack.keys():
-            spec=self.paren.experiment.stack[n]
-            try:
-                pos=[int(float(i)) for i in n.split('_')[1:]]
-                xlst.append(pos[0])
-                ylst.append(pos[1])
-            except:
-                continue
-            self.vals.append(self.evalme(spec)['out'])
+        import numpy as np
+        if len(self.variab)>0 and hasattr(self.paren,'wafer'): #already calculated values
+            varfunc=compile("result="+self.variab,'compiled','exec')
+            for samp in self.paren.wafer.samps:
+                if self.variab=='thick':
+                    if len(samp.thick)<1: continue
+                    zval=np.mean(list(samp.thick.values()))
+                else:
+                    odict={'result':0,'bands':samp.bands}
+                    exec(varfunc,odict)
+                    zval=odict['result']
+                    if np.iterable(zval): zval=zval[0]
+                if len(samp.pos)<2: continue
+                print(len(self.vals)+" values calculated")
+                self.vpos.append(samp.pos)
+                self.vals.append(zval)
+        else:
+            imp=self.code
+            imp=imp.replace("return ","results['out']=")
+            self.func=compile(imp,'compiled','exec')
+        
+            for n in self.paren.experiment.stack.keys():
+                spec=self.paren.experiment.stack[n]
+                try:
+                    pos=[int(float(i)) for i in n.split('_')[1:]]
+                    samp.vpos.append(pos[:2])
+                except:
+                    continue
+                self.vals.append(self.evalme(spec)['out'])
 
     def _calculate_fired(self):
         if self.func!=None:
@@ -1306,12 +1330,16 @@ class ControlPanel(HasTraits):
         """ Plots an image on the canvas in a thread safe way. """
         #self.figure.axes[0].images=[]
         if self.spect_last==None:
+            pin=self.spectrac.instr
             if rc.debug>0: print("(re)new graphs")
             if type(spect)!=list and len(spect.shape)==1:#self.experiment.combine:
-                self.spect_last=self.figure.axes[0].plot(self.spectrac.pixels,spect,rc.line_color,lw=rc.line_width)[0]
+                if len(self.spectrac.pixels)==len(spect): pixs=self.spectrac.pixels
+                else: 
+                    ipck=arange(len(pin.chanene))[array(pin.intfact)>0]
+                    pixs=pin.chanene[ipck[0]]
+                self.spect_last=self.figure.axes[0].plot(pixs,spect,rc.line_color,lw=rc.line_width)[0]
             else:
                 from numpy import array,arange
-                pin=self.spectrac.instr
                 self.spect_last=[]
                 ipck=arange(len(pin.chanene))[array(pin.intfact)>0]
                 ibnd=min(len(ipck),len(spect))
@@ -1376,17 +1404,22 @@ class ControlPanel(HasTraits):
                 ax.set_ylim(yran[0]*1.1-yran[1]*0.1,yran[1]*1.1-yran[0]*0.1)
         self.results.canvas.draw()
 
-    def design_show(self, plan):
+    def design_show(self, plan, values=[]):
         ax=self.design.axes[0]
         ax.clear()
-        if len(plan)>0:
+        if len(values)>0:
+            ax.scatter([p[0] for p in plan],[p[1] for p in plan],c=values)
+            ax.figure.colorbar()
+        elif len(plan)>0:
             ax.plot([p[0] for p in plan],[p[1] for p in plan],'bd-')
             pp=ax.get_xlim()
             mdis=(pp[1]-pp[0])*0.02
-            ax.set_xlim(pp[0]-mdis,pp[1]+mdis)
+            self.scanner.xdim=[pp[0]-mdis,pp[1]+mdis]
             pp=ax.get_ylim()
             if pp[0]<pp[1]: pp=pp[::-1]
-            ax.set_ylim(pp[0]-mdis,pp[1]+mdis)
+            self.scanner.ydim=[pp[0]-mdis,pp[1]+mdis]
+        if hasattr(self.scanner,'xdim'): ax.set_xlim(*self.scanner.xdim)
+        if hasattr(self.scanner,'ydim'): ax.set_ylim(*self.scanner.ydim)
         self.design.canvas.draw()
 
     def _acquire_fired(self):

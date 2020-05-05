@@ -134,6 +134,7 @@ web_timeout=18
 web_restart_gap=8
 chan_combine=False
 chan_corr=[ 1.40927795,  1.35854274,  1.53249378]
+chan_equal=(1,1,1)
 ref_epsfile="tio2_tl-eps.mat"
 ref_epsweb="http://physics.muni.cz/~munz/manip/CVD/"
 ref_epscorr=[-0.06273044,  1.09829889]
