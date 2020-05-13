@@ -1,0 +1,14 @@
+AcqThread
+
+in self.prepare -> scanner.next_point
+in self.acquire -> spectrac.measure
+in self.process set
+	self.analyse.calculate=True -> panel.analyse -> instance of Analyse
+		Analyse.calculate is "Event"
+		calling _calculate_fired()
+	processing_job=analyse(spect) #work in background
+	self.result() -> panel.result_update()
+
+on each acq. thread is launched -> when is it collected? can it write to Wafer structure?
+
+can it update map on ended calculation?

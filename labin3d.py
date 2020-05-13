@@ -37,10 +37,12 @@ class specscope3d(specscope):
                         if isok and rep[-1][:2]=='ok': break
                 return [r for r in rep[:-1] if len(r.strip())>0]
 
-        def ahome(self):
+        def ahome(self,pos=[]):
                 self.awrite("G28 X")
                 self.awrite("G28 Y")
-                if hasattr(rc,'xy_cent'):
+                if len(pos)>1:
+                    self.goto(*pos)
+                elif hasattr(rc,'xy_cent'):
                     self.goto(*rc.xy_cent)
                 return self.acomm()
 

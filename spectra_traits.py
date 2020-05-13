@@ -381,10 +381,16 @@ class Scan(HasTraits):
 
     def _shome_fired(self):
         # reset axis
-        if self.instr: self.instr.ahome()
         #for i in range(2):
         #    self.actpos[i]=rc.xy_cent[i]
-        self.actpos=rc.xy_cent
+        from numpy import iterable
+        if self.instr==None: return 
+        if iterable(rc.refer_pos):
+            self.instr.ahome(rc.refer_pos)
+            self.actpos=rc.refer_pos[:2]
+        else:
+            self.instr.ahome()
+            self.actpos=rc.xy_cent
         self.disp_pos()
         self.setup()
 
@@ -432,29 +438,21 @@ class Scan(HasTraits):
         if self.instr: self.instr.rate(1,self.Xstep)
         self.actpos[0]+=self.Xstep
         self.disp_pos()
-        #if self.instr: self.instr.rate(2,self.Ystep)
-        #self.actpos[1]+=self.Ystep
 
     def _left_fired(self):
         if self.instr: self.instr.rate(1,-self.Xstep)
         self.actpos[0]-=self.Xstep
         self.disp_pos()
-        #if self.instr: self.instr.rate(2,-self.Ystep)
-        #self.actpos[1]-=self.Ystep
 
     def _down_fired(self):
         if self.instr: self.instr.rate(2,self.Ystep)
         self.actpos[1]+=self.Ystep
         self.disp_pos()
-        #if self.instr: self.instr.rate(1,-self.Xstep)
-        #self.actpos[0]-=self.Xstep
 
     def _up_fired(self):
         if self.instr: self.instr.rate(2,-self.Ystep)
         self.actpos[1]-=self.Ystep
         self.disp_pos()
-        #if self.instr: self.instr.rate(1,self.Xstep)
-        #self.actpos[0]+=self.Xstep
 
     def _near_fired(self):
         if self.instr: 
@@ -490,7 +488,7 @@ class Scan(HasTraits):
     def next_point(self):
         from time import sleep
         exper=self.exelist['plan'].experiment
-        if len(self.program)==0:
+        if len(self.program)==0: #end of plan
             if self.since_calib>0: #at least some points measured
                 # will stop acquisition and save data
                 self.exelist['plan']._start_stop_acquisition_fired()
@@ -501,6 +499,7 @@ class Scan(HasTraits):
         if self.since_calib>0 and rc.save_period>0 and self.since_calib%rc.save_period==0:
             if exper.sname!="": exper._saveall_fired()
         point=self.program.pop(0)
+        #movement
         if hasattr(self.instr,'ard'): #arduino/velleman
             if hasattr(self.instr,'goto'):
                 self.instr.goto(point[0],point[1])
@@ -510,6 +509,7 @@ class Scan(HasTraits):
         else:
             print("riding %i,%i"%(point[0],point[1]))
             sleep(10-self.speed)
+        #recalibration
         if exper.recalper>0 and self.since_calib>=exper.recalper:
             # recalibration planned
             if rc.refer_pos[0]*rc.refer_pos[1]>0: #have calibration sample
@@ -522,6 +522,7 @@ class Scan(HasTraits):
         self.npoints-=1
         self.since_calib+=1
         #self.cpos=str(list(self.actpos))
+        # run acquisition for all "keys" !!??
         for k in self.exelist.keys():
             self.exelist[k].acquire=True
 
@@ -538,9 +539,16 @@ class Scan(HasTraits):
 #        self.process=self.instr.scan_save(self.Xstep,self.Ystep,self.Xpts,self.Ypts,self.radius)
 #----------------------------------------
 
-def analyse(spect):
+def analyse(func,odict,disp):
     """ Function called to do the processing (more time consuming, doesn't block the acquisition) - nothing implemented yet"""
     from scanner import spectra
+    exec(func,odict)
+    if 'samp' in odict: 
+        disp("sample %s calculated"%odict['samp'].get_name())
+    res=odict['results']
+    if 'out' in res:
+        output=str(res['out'])
+        disp(output)
     #spectra.extrema()
 
 class AcquisitionThread(Thread):
@@ -557,9 +565,18 @@ class AcquisitionThread(Thread):
                 return
         except AttributeError:
             pass
-        self.analyse.calculate = True
-        self.processing_job = Thread(target=analyse, args=(spect,))#,self.results))
-        self.processing_job.start()
+        self.analyse.calculate = True #call the Analyse event
+        instr=self.experiment.instr
+            
+        if self.analyse.func!=None and self.analyse.bkgproc:
+            odict=self.analyse.evalme(spect,prep_only=True)#{'results':{}}
+            #print("starting proc. sample "+odict['samp'].get_name())
+            #if instr!=None: odict['samp']=getattr(instr,"samp",None)
+            self.processing_job = Thread(target=analyse, args=(self.analyse.func,odict,self.display))
+            self.processing_job.start()
+        else:
+            self.processing_job = Thread(target=analyse, args=(spect,{},self.display))#,self.results))
+            # do nothing for the moment
         self.result()
 
     def run(self):
@@ -620,6 +637,7 @@ class Spectrac(HasTraits):
     port = Int(rc.web_port, label="connect. port no.")
     #Item('elow'), Item('ehigh'),
     setmeup = Button("Initialize")
+    setmeall = Button("Init and calibrate")
     equalize = Button("Equalize channels")
     calib = Button("Calibrate SiO2")
     singlechan=Str#,Enum(['all channels','single channel'])
@@ -653,7 +671,7 @@ class Spectrac(HasTraits):
                 Item('calib',width=5,show_label=False, enabled_when='instr.samp!=None'),
                 HSplit(Item('refer_x'),Item('refer_y'),),
                 HSplit(Item('debug'),Item('relative'),),
-                HSplit(Item('port'),Item('setmeup',show_label=False)),
+                HSplit(Item('setmeup',show_label=False),Item('setmeall',show_label=False)),#Item('port'),
                 springy=True),
                 resizable=True,
                 handler=ChanHandler
@@ -692,6 +710,11 @@ class Spectrac(HasTraits):
                 #self.instr=labin.uniocean(path="http://localhost:%i/?exp="%self.port,chan=rc.chan_sel) ##FM replaced webocean
                 self.instr=labin.oceanjaz()
         self.instr.setup([self.elow,self.ehigh],estep=self.resol,integ=self.exper.expo,aver=self.exper.aver)
+        import os
+        if hasattr(rc,'dark_path') and os.path.exists(rc.dark_path): #precalibration
+            from numpy import loadtxt
+            self.instr.dark=loadtxt(rc.dark_path,unpack=True)
+            print('preloaded dark '+str(self.instr.dark.mean(1)))
         if len(self.instr.chanene)>0: self.exper.display(" found %i channels ..."%len(self.instr.chanene))
         #if len(self.instr.chanrange)>0: self.exper.display(" found %i channels ..."%len(self.instr.chanrange))
         self.exper.instr=self.instr
@@ -716,6 +739,15 @@ class Spectrac(HasTraits):
         self.setup()
         self.exper.ready=True
         self.paren.ready=True
+        #self.scanner.setup()
+
+    def _setmeall_fired(self):
+        self.setup()
+        self.exper.ready=True
+        self.paren.ready=True
+        self.paren.scanner._shome_fired()
+        self.exper._refer_fired()
+        self.paren.scanner._gocenter_fired()
         #self.scanner.setup()
 
     def _chanshow_fired(self):
@@ -844,8 +876,9 @@ class Spectrac(HasTraits):
                 print("problem combining:no pict selected")
         self.instr.samp=self.instr.makesamp(spect)
         self.instr.samp.laystruct=experiment.material
+        self.instr.samp.pos=list(self.paren.scanner.actpos.copy())
         if hasattr(self.paren,'wafer'): self.paren.wafer.samps.append(self.instr.samp)
-        return(spect)
+        return spect
 
     def get_match(self, caltab):
         perc=rc.flat_above_quantile
@@ -872,24 +905,26 @@ class Analyse(HasTraits):
     ehigh = Float(5.5, label="to", desc="upper energy band")
     chuse = Enum([1,2,3], label="Channel to use")
     smnum = Int(0, label="Sample number to use")
-    doplot = Bool(False,label="Show graph")
+    doplot = Bool(False, label="Show graph")
+    bkgproc = Bool(False, label="Process", desc="in background")
     code = Code("return [xdat.mean(),ydat.mean()]")
     run = Button('Eval')
     debug = Button('Debug')
     res = Button('Reset')
     variab = String('thick',label='What to show')
-    fname = File('')
+    fname = File('',label="Script name")
     load = Button('Load')
     save = Button('Save')
+    dump = Button('Dump', desc="save displayed map to file")
     map = Button('Map')
     output = String("here comes the data",label="Output")
     view = View(
                 HGroup(Item('erange', editor=BoundsEditor(low_name = 'elow', high_name = 'ehigh')),
-                    Item('chuse'),Item('smnum'),Item('doplot')),
+                    Item('chuse'),Item('smnum'),Item('doplot'),Item('bkgproc')),
                 Item('code',show_label=False),
                 HGroup(Item('run',show_label=False),Item('res',show_label=False),Item('debug',show_label=False),
                     Item('map',show_label=False),Item('variab')),
-                HGroup(Item('fname',show_label=False),Item('load',show_label=False),Item('save',show_label=False),),
+                HGroup(Item('fname',show_label=False),Item('load',show_label=False),Item('save',show_label=False),Item('dump',show_label=False),),
                 Item('output',show_label=False,style='readonly')
                 )#, enabled_when="config!=None")
     calculate = Event
@@ -897,9 +932,10 @@ class Analyse(HasTraits):
     paren=None
     vals=[]
 
-    def evalme(self,ydat=None): 
+    def evalme(self,ydat=None,prep_only=False): 
         '''not working for multichannel
         '''
+        samp=None
         if not iterable(ydat): ydat=self.instr.last
         if hasattr(self,'instr'):
             if len(self.instr.chanene)>0:
@@ -915,13 +951,17 @@ class Analyse(HasTraits):
                 samp=self.paren.wafer.samps[self.smnum]
                 if self.chuse>len(samp.bands): self.chuse=1
                 if self.chuse>0: xdat=samp.bands[self.chuse-1].ix
-                if not iterable(ydat): ydat=samp.bands[self.chuse-1].iy
-                else: ydat=ydat[self.chuse-1]
+                if iterable(ydat): 
+                    if len(ydat.shape)==2: ydat=ydat[self.chuse-1]
+                else: ydat=samp.bands[self.chuse-1].iy
 
         sel=(xdat>=self.elow)*(xdat<=self.ehigh)
-        if not iterable(ydat) or len(ydat)!=len(sel): return 0
-        odict={'xdat':xdat[sel],'ydat':ydat[sel],'results':{}}
-        if hasattr(self.instr,"samp"): odict['samp']=self.instr.samp
+        if not iterable(ydat) or len(ydat)!=len(sel): 
+            if prep_only: return {}
+            else: return 0
+        odict={'xdat':xdat[sel],'ydat':ydat[sel],'samp':samp,'results':{}}
+        if samp==None and hasattr(self.instr,"samp"): odict['samp']=self.instr.samp
+        if prep_only: return odict
         exec(self.func,odict)
         return odict['results']
 
@@ -954,24 +994,21 @@ class Analyse(HasTraits):
         #rep=exec(self.code) not working
         imp=self.code
         imp=imp.replace("return ","results['out']=")
-        #imp="def runme(xdat,ydat):\n    "+"\n    ".join(self.code.split("\n"))
-        #open("analme.py","w").write(imp)
-        #if 'analme' in locals():
-        #    from imp import reload
-        #    del self.func
-        #    reload(analme)
-        #else: import analme
-        #exec(imp)
         self.func=compile(imp,'compiled','exec')
         self.output=str(self.evalme()['out'])
         #self.output="Evaluation failed"
 
     def _map_fired(self):
+        '''apply calculation on all data
+            variab: precalculated values to display (from panel.wafer)
+            code: apply code to all 
+        '''
         self.vpos=[]
         self.vals=[]
         import numpy as np
         if len(self.variab)>0 and hasattr(self.paren,'wafer'): #already calculated values
             varfunc=compile("result="+self.variab,'compiled','exec')
+            print("calculating '%s' for %i points"%(self.variab,len(self.paren.wafer.samps)))
             for samp in self.paren.wafer.samps:
                 if self.variab=='thick':
                     if len(samp.thick)<1: continue
@@ -982,27 +1019,56 @@ class Analyse(HasTraits):
                     zval=odict['result']
                     if np.iterable(zval): zval=zval[0]
                 if len(samp.pos)<2: continue
-                print(len(self.vals)+" values calculated")
+                #print("%i values calculated"%(len(self.vals)))
                 self.vpos.append(samp.pos)
                 self.vals.append(zval)
         else:
             imp=self.code
             imp=imp.replace("return ","results['out']=")
             self.func=compile(imp,'compiled','exec')
+            odict={'results':{}}
+            if hasattr(self.paren,'wafer'): #using wafer 
+                for samp in self.paren.wafer.samps:
+                    odict['samp']=samp
+                    exec(self.func,odict)
+                    self.vpos.append(samp.pos)
+                    self.vals.append(odict['out'])
+            elif len(self.paren.experiment.stack)>0: #using stack
+                for n in self.paren.experiment.stack.keys():
+                    spec=self.paren.experiment.stack[n]
+                    try:
+                        pos=[int(float(i)) for i in n.split('_')[1:]]
+                        self.vpos.append(pos[:2])
+                    except:
+                        continue
+                    odict['ydat']=spec
+                    exec(self.func,odict)
+                    self.vals.append(odict['out'])
         
-            for n in self.paren.experiment.stack.keys():
-                spec=self.paren.experiment.stack[n]
-                try:
-                    pos=[int(float(i)) for i in n.split('_')[1:]]
-                    samp.vpos.append(pos[:2])
-                except:
-                    continue
-                self.vals.append(self.evalme(spec)['out'])
+        print("showing values from %.1f to %.1f"%(np.min(self.vals),np.max(self.vals)))
+        self.paren.design_show(self.vpos,self.vals)
+    
+    def _dump_fired(self):
+        from numpy import array,savetxt,concatenate
+        if len(self.vpos)==len(self.vals):
+            odata=concatenate([array(self.vpos).T,self.vals])
+        else:
+            odata=self.vals
+        savetxt(self.fname,odata.T,fmt="%8.3f")
 
     def _calculate_fired(self):
-        if self.func!=None:
-            self.vals=self.evalme()
-            self.output=str(self.vals)
+        '''Event called by analyse
+        odict: input data
+        is processed in run thread - not for time consuming analysis...
+        '''
+        #if self.func!=None:
+        if False:
+            odict={'results':{'out':[]}}
+            odict['samp']=getattr(self.instr,"samp",None)
+            exec(self.func,odict)
+            res=odict['results']
+            if 'out' in res:
+                self.output=str(res['out'])
 
 my_bindings = KeyBindings(
     KeyBinding (binding1 = 'r',
@@ -1099,12 +1165,15 @@ class ControlPanel(HasTraits):
         self.spectrac.exper = self.experiment
         self.spectrac.paren = self
         self.analyse.paren = self
-        #if rc.auto_init: self.spectrac.setup()
-        self.scanner.exelist['spectrac']=self.spectrac
+        # self.scanner.exelist['spectrac']=self.spectrac 
+        # only for automatic acquisition
         self.scanner.exelist['plan']=self
         #self.bardial.open()
 
     def _showme_fired(self):
+        '''
+        show spectra from stack
+        '''
         from matplotlib import patches
         for p in self.stack_disp:
             try:
@@ -1369,7 +1438,7 @@ class ControlPanel(HasTraits):
         #self.profile.canvas.draw()
 
     def result_update(self):
-        """plots results of analysis"""
+        """plots results of the analysis"""
         from numpy import arange,iterable
         if not(self.analyse.doplot): return
         if iterable(self.analyse.vals):
@@ -1409,7 +1478,8 @@ class ControlPanel(HasTraits):
         ax.clear()
         if len(values)>0:
             ax.scatter([p[0] for p in plan],[p[1] for p in plan],c=values)
-            ax.figure.colorbar()
+            print("scaling to "+str(self.scanner.xdim)+str(self.scanner.ydim))
+            ax.colorbar()
         elif len(plan)>0:
             ax.plot([p[0] for p in plan],[p[1] for p in plan],'bd-')
             pp=ax.get_xlim()
@@ -1423,6 +1493,7 @@ class ControlPanel(HasTraits):
         self.design.canvas.draw()
 
     def _acquire_fired(self):
+        # only shows the point on display
         self.design.axes[0].plot(self.scanner.actpos[0],self.scanner.actpos[1],'rs')
         self.design.canvas.draw()
 

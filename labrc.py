@@ -5,6 +5,7 @@ smoothing=7
 mean=20
 intime=25
 use_dyndark=0
+dark_path="C:\\Users\\optik\\Documents\\Data\\Calib\\dark_25ms.dat"
 soft_smooth=0
 use_shut=1
 relative=True
