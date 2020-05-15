@@ -73,6 +73,19 @@ def gettrans(enx,dpos,ref,smot=0.03,skiplowest=0,rep=1,osel=None,disfun=None,wei
             caltab[j][:,istart[i]:iend[i]+1]*=zub[j]
     return caltab,ysel
 
+def testgap(cens,limfrac=0.1,mindif=10):
+    if len(cens)<2: return
+    cens=np.array(cens)
+    mval,sval=np.mean(cens),np.std(cens)
+    if sum(abs(cens-mval)<0.5*sval)/len(cens)<limfrac: #has gap
+        co1=cens<mval-.5*sval
+        mval1,sval1=np.median(cens[co1]),np.std(cens[co1])
+        co2=cens>mval+.5*sval
+        mval2,sval2=np.median(cens[co2]),np.std(cens[co2])
+        if (mval2-mval1)<mindif: return mval,sval
+        return mval1,sval1/sval,mval2,sval2/sval
+    return mval,sval
+
 class Band():
     ix=None
     iy=None
@@ -287,19 +300,26 @@ class Band():
             return lambda p:profit.plate(self.ix,epsi,[p[0]])*p[1]+p[2]
         return profit.plate(self.ix,epsi,[p[0]])*p[1]+p[2]
 
-    def plot(self,amodel=False,match=True):
-        from matplotlib import pyplot as pl
-        if match:
-            pl.plot(self.ix[self.sel],(self.absol()[self.sel]-self.rat[1])/self.rat[0])
+    def plot(self,amodel=False,match=True,ax=None):
+        if ax==None:
+            from matplotlib import pyplot as pl
         else:
-            pl.plot(self.ix[self.sel],self.absol()[self.sel])
+            pl=ax
+        if match:
+            dat=pl.plot(self.ix[self.sel],(self.absol()[self.sel]-self.rat[1])/self.rat[0])[0]
+        else:
+            dat=pl.plot(self.ix[self.sel],self.absol()[self.sel])[0]
         if amodel and len(self.samp.thick)>0:
             thick=self.samp.get_thick(unc=False)
-            if match:## proc kdyz to umi spocitat model uvnitr? chceme model oprosteny od renormalizace..aby navazovaly sousedni intervaly(?)
-                pl.plot(self.ix[self.sel],(self.model([thick])[self.sel]-self.rat[1])/self.rat[0])
+            if match:
+                ## proc, kdyz to umi spocitat model uvnitr? 
+                ## chceme model oprosteny od renormalizace..aby navazovaly sousedni intervaly(?)
+                modl=pl.plot(self.ix[self.sel],(self.model([thick])[self.sel]-self.rat[1])/self.rat[0])[0]
                 #pl.plot(self.ix[self.sel],self.model([thick,1,0])[self.sel])
             else:
-                pl.plot(self.ix[self.sel],self.model([thick])[self.sel])
+                modl=pl.plot(self.ix[self.sel],self.model([thick])[self.sel])[0]
+            return [dat,modl]
+        return [dat]
 
     def fit(self,inval=None,irat=[1.3,-0.15],save=None,refer=None,prefun=False,constr=None):
         '''
@@ -393,7 +413,6 @@ class Sample():
         import pickle,os
         #epssi=spectra.dbload("cSi_asp")
         #pickle.dump(epssi,open(indir+"si_eps_full.mat","w"))
-
         from scipy import interpolate as ip
         if not 'ksi' in diel:
             if not os.path.exists(indir+"si_eps_fulld.mat"):
@@ -408,6 +427,7 @@ class Sample():
             else:
                 tsio2=np.loadtxt(indir+"sio2_palik_g.mat",unpack=True,skiprows=3)
             diel['ksio2']=ip.interp1d(tsio2[0],tsio2[1]**2)
+        if self.wafer!=None: self.wafer.status['calibrated']=True
 
     def norm(self,px):
         from scanner import profit
@@ -421,6 +441,18 @@ class Sample():
         for i in range(len(self.bands)):
             if i>=len(dark.bands): break
             self.bands[i].corrdark(dark.bands[i].iy)
+    
+    def update_nearest(self,maxnbrh=10,maxdist=25):
+        import numpy as np
+        cpos=np.array(self.pos)
+        smsel=[s for s in self.wafer.samps if max(abs(cpos-s.pos))<maxdist]
+        dist=[np.sqrt(sum((cpos-s.pos)**2)) for s in smsel]
+        zlist=np.argsort(dist)
+        if maxnbrh>=len(smsel): maxnbrh=len(smsel)-1
+        ddist=0.001
+        self.nearest=nnear=dict([(dist[j]+ddist*j,smsel[j]) for j in zlist[1:maxnbrh+1]])
+        return np.mean(dist[1:maxnbrh+1])
+
 
     def get_thick(self,select=None,unc=True):
         if len(self.thick)==0: return None
@@ -631,19 +663,22 @@ class Sample():
                 dat=[float(q) for q in l.split()]
         of.close()
 
-    def plot(self,amodel=False,lims=[0,1],unit='eV',match=True):
+    def plot(self,amodel=False,lims=[0,1],unit='eV',match=True,ax=None):
+        plst=[]
         for b in self.bands:
-            b.plot(amodel,match=match)
+            plst+=b.plot(amodel,match=match,ax=ax)
         from matplotlib import pyplot as pl
         pl.ylim(*lims)
         pl.xlabel(unit)
         pl.grid()
+        return plst
 
 #posfun=lambda ix,iy:np.any([(edgepos==[ix,iy]).sum(1)==2])
 
 class Wafer():
 
     expos=0
+    status={}
 
     def __init__(self,pattern,irange,laystruct=None,delim=None,maxband=0,headerow=0,position=0):
         self.names={}

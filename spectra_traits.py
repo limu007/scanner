@@ -37,6 +37,8 @@ from pyface.progress_dialog import ProgressDialog as ProgressBar
 
 matplotlib.use('QT4Agg')
 from matplotlib.figure import Figure
+from matplotlib import pyplot#.cm import get_cmap
+glob_cmap=pyplot.cm.get_cmap('RdYlBu')
 
 from . import labin,labin3d
 from . import labrc as rc
@@ -199,6 +201,9 @@ class Experiment(HasTraits):
             print(oname+" saved /"+str(array(speclst).shape))
 
     def _darken_fired(self,interrupt=True):
+        from numpy import median, iterable
+        if iterable(self.instr.dark): odark=median(self.instr.dark,1)
+        else: odark=[]
         if self.paren.acquisition_thread and interrupt and self.paren.acquisition_thread.isAlive():
             self.paren.acquisition_thread.wants_abort = True
         if self.shut:
@@ -208,6 +213,12 @@ class Experiment(HasTraits):
         self.paren.status_string="dark acquisition"
         self.instr.dark=self.instr.result(sub_dark=False,div_flat=False,smooth=self.smooth,maxit=-1) #no correction/calibration
         self.paren.status_string="dark curr. saved"
+        if len(odark)==len(self.instr.dark):
+            odark=odark-median(self.instr.dark,1)
+            self.display("dark measured - dif %s"%str(odark))
+        else:
+            odark=median(self.instr.dark,1)
+            self.display("dark measured - median %s"%str(odark))
         if self.shut:
             rc.use_shut=1
         #if self.config!=None: self.config.adjust_image()
@@ -222,6 +233,10 @@ class Experiment(HasTraits):
         rep=self.instr.result(div_flat=False,smooth=self.smooth,maxit=-1) #should use dark subtraction
         if not iterable(rep):
             print("reference failed")
+            return
+        fperc=percentile(rep,90,1)
+        if any(fperc<10):
+            message("No light for calibration!", title = 'Warning')
             return
         self.instr.flat=rep
         if rc.saturate>0:
@@ -640,6 +655,7 @@ class Spectrac(HasTraits):
     setmeall = Button("Init and calibrate")
     equalize = Button("Equalize channels")
     calib = Button("Calibrate SiO2")
+    focus = Button("Get focus")
     singlechan=Str#,Enum(['all channels','single channel'])
     chanlist=['single channel']
     chanshow = Button("Show channels")
@@ -668,7 +684,7 @@ class Spectrac(HasTraits):
                     Item('singlechan',show_label=False,editor=EnumEditor(name='handler.channels')),
                     Item('equalize',width=5,show_label=False),
                     Item('chanshow',width=5,show_label=False),Item('chanmatch')),#,enabled_when="instr.flat!=None")),
-                Item('calib',width=5,show_label=False, enabled_when='instr.samp!=None'),
+                Item('calib',width=5,show_label=False, enabled_when='instr.samp!=None'),Item('focus',show_label=False),
                 HSplit(Item('refer_x'),Item('refer_y'),),
                 HSplit(Item('debug'),Item('relative'),),
                 HSplit(Item('setmeup',show_label=False),Item('setmeall',show_label=False)),#Item('port'),
@@ -749,6 +765,15 @@ class Spectrac(HasTraits):
         self.exper._refer_fired()
         self.paren.scanner._gocenter_fired()
         #self.scanner.setup()
+
+    def _focus_fired(self):
+        rep=labin3d.zcalib(self.instr,rc.refer_pos[:2])
+        print(rep[0])
+        mid=(rep[0][0]+rep[0][1])/2.
+        if mid<self.instr.gzmin: return
+        if mid>self.instr.gzmax: return
+        self.goto(rc.refer_pos[:2]+[mid])
+        self.instr.gz=rc.refer_pos[-1]
 
     def _chanshow_fired(self):
         if self.instr==None: return
@@ -877,7 +902,10 @@ class Spectrac(HasTraits):
         self.instr.samp=self.instr.makesamp(spect)
         self.instr.samp.laystruct=experiment.material
         self.instr.samp.pos=list(self.paren.scanner.actpos.copy())
-        if hasattr(self.paren,'wafer'): self.paren.wafer.samps.append(self.instr.samp)
+        if hasattr(self.paren,'wafer'): 
+            self.paren.wafer.samps.append(self.instr.samp)
+            self.instr.samp.wafer=self.paren.wafer
+            self.instr.samp.update_nearest()
         return spect
 
     def get_match(self, caltab):
@@ -911,6 +939,7 @@ class Analyse(HasTraits):
     run = Button('Eval')
     debug = Button('Debug')
     res = Button('Reset')
+    fitshow = Button('Show fit')
     variab = String('thick',label='What to show')
     fname = File('',label="Script name")
     load = Button('Load')
@@ -923,7 +952,7 @@ class Analyse(HasTraits):
                     Item('chuse'),Item('smnum'),Item('doplot'),Item('bkgproc')),
                 Item('code',show_label=False),
                 HGroup(Item('run',show_label=False),Item('res',show_label=False),Item('debug',show_label=False),
-                    Item('map',show_label=False),Item('variab')),
+                    Item('map',show_label=False),Item('fitshow',show_label=False),Item('variab')),
                 HGroup(Item('fname',show_label=False),Item('load',show_label=False),Item('save',show_label=False),Item('dump',show_label=False),),
                 Item('output',show_label=False,style='readonly')
                 )#, enabled_when="config!=None")
@@ -989,6 +1018,28 @@ class Analyse(HasTraits):
         except:
             self.status_string="Error in expression"
         self.vals=[]
+
+    def _fitshow_fired(self):
+        if self.instr==None: return
+        if hasattr(self.instr,"samp"): 
+            samp=self.instr.samp
+        else:
+            if not(hasattr(self.paren,'wafer')) or self.paren.wafer==None: return 
+            if self.smnum>=len(self.paren.wafer.samps): self.smnum=0
+            samp=self.paren.wafer.samps[self.smnum]
+            
+        #self.paren.figure.clean()
+        ax=self.paren.figure.axes[0]
+        ax.clear()
+        #self.paren.spect_last=[]
+        if len(samp.thick)==0: 
+            # no fit yet
+            self.status_string="No fit saved yet!"
+            return
+        rep=samp.plot(ax=ax)
+        self.paren.spect_last=rep
+        self.paren.figure.canvas.draw()
+
 
     def _run_fired(self):
         #rep=exec(self.code) not working
@@ -1477,9 +1528,9 @@ class ControlPanel(HasTraits):
         ax=self.design.axes[0]
         ax.clear()
         if len(values)>0:
-            ax.scatter([p[0] for p in plan],[p[1] for p in plan],c=values)
-            print("scaling to "+str(self.scanner.xdim)+str(self.scanner.ydim))
-            ax.colorbar()
+            sc=ax.scatter([p[0] for p in plan],[p[1] for p in plan],c=values,cmap=glob_cmap)
+            print("scaling to "+str(self.scanner.xdim)+" and "+str(self.scanner.ydim))
+            ax.figure.colorbar(sc)
         elif len(plan)>0:
             ax.plot([p[0] for p in plan],[p[1] for p in plan],'bd-')
             pp=ax.get_xlim()

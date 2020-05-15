@@ -93,6 +93,7 @@ class specscope3d(specscope):
                 if np.iterable(self.dark): last-=self.dark
                 if bord>0: last=last[:,bord:-bord]
                 if last.sum()<minval: #no signal here
+                    print("focus stopped at step %i"%(len(prof)))
                     break
                 if rep>1:
                     prof.append([zpos]+list(last.sum(1)))
@@ -100,13 +101,15 @@ class specscope3d(specscope):
                     prof.append([zpos,last.sum()])
                 zpos+=zstep
                 #if prof[-1][1]<prof[0][1]*0.8: break
-            self.gz=self.gzmax
+            self.gz=zpos#self.gzmax
             prof=np.array(prof).T
             if rep>0 or len(prof[0])<5: return prof #no fitting
             k=1
             idx=np.polyfit(prof[0],prof[k],4)
             ip=prof[k].argmax()
-            fx=np.r_[prof[0][ip-2]:prof[0][ip+3]:100j]
+            imin=max(0,ip-2)
+            imax=min(ip+3,len(prof[k])-1)
+            fx=np.r_[prof[0][imin]:prof[0][imax]:100j]
             self.zbest=fx[np.polyval(idx,fx).argmax()]
             return self.acom()
 
@@ -152,10 +155,10 @@ class specscope3d(specscope):
                     self.ard.close()
                     del self.ard
 
-def zcalib(self,pos,factval=[1,1,0]):
+def zcalib(self,pos,factval=[1,1,0],step=0.1):
     import numpy as np
     self.goto(pos[0],pos[1])
-    prof=self.focus(self.gzmin+0.1,0.1,rep=2,integ=10,factval=factval,minval=10,bord=100)
+    prof=self.focus(self.gzmin+step,step,rep=2,integ=10,factval=factval,minval=10,bord=100)
     idx=[np.polyfit(prof[0],p,4) for p in prof[1:sum(factval)+1]]
     roughpos=[prof[0][p.argmax()] for p in prof[1:sum(factval)+1]]
     pox=[np.roots(np.polyder(p)) for p in idx]
