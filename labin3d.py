@@ -15,7 +15,7 @@ class specscope3d(specscope):
                 specscope.__init__(self, *args, **kwargs)
                 self.gx=0
                 self.gy=0
-                self.gz=self.gzmin
+                self.gz=(self.gzmin+self.gzmax)/2.
 
         def adrive(self,peri=10,gap=0):
                 import serial
@@ -183,7 +183,15 @@ class ocean3d(oceanjaz,specscope3d):
             #print(rep[-1])
             self.gx=0
             self.gy=0
-            self.gz=self.gzmin
+            self.awrite("M114")
+            inp=self.acomm()
+            if inp.find('Z')>0:
+                p1=inp.find('Z')
+                ival=float(inp[p1+2:p1+5])
+                self.gz=ival
+                print("Z position found %.2f"%ival)
+            else:
+                self.gz=(self.gzmin+self.gzmax)/2.
 
 
         def fastline(self,nstep,dstep=10,axe='X',mchan=0,bin=1,imin=None,imax=None):
@@ -201,6 +209,7 @@ class ocean3d(oceanjaz,specscope3d):
             
         def end(self):
             if hasattr(self,"ard") and self.ard!=None: 
+                self.goto(rc.xy_cent[0],rc.xy_cent[1],self.gzmin+)
                 self.ard.close()
                 del self.ard
             oceanjaz.end(self)

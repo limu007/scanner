@@ -774,6 +774,7 @@ class Spectrac(HasTraits):
         if mid>self.instr.gzmax: return
         self.goto(rc.refer_pos[:2]+[mid])
         self.instr.gz=rc.refer_pos[-1]
+        self.awrite("G92 Z%.2f"%rc.refer_pos[-1]) #set new position
 
     def _chanshow_fired(self):
         if self.instr==None: return
@@ -1102,7 +1103,7 @@ class Analyse(HasTraits):
     def _dump_fired(self):
         from numpy import array,savetxt,concatenate
         if len(self.vpos)==len(self.vals):
-            odata=concatenate([array(self.vpos).T,self.vals])
+            odata=concatenate([array(self.vpos).T,[self.vals]])
         else:
             odata=self.vals
         savetxt(self.fname,odata.T,fmt="%8.3f")
@@ -1528,6 +1529,7 @@ class ControlPanel(HasTraits):
         ax=self.design.axes[0]
         ax.clear()
         if len(values)>0:
+            ax.figure.clear()
             sc=ax.scatter([p[0] for p in plan],[p[1] for p in plan],c=values,cmap=glob_cmap)
             print("scaling to "+str(self.scanner.xdim)+" and "+str(self.scanner.ydim))
             ax.figure.colorbar(sc)
