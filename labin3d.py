@@ -184,7 +184,7 @@ class ocean3d(oceanjaz,specscope3d):
             self.gx=0
             self.gy=0
             self.awrite("M114")
-            inp=self.acomm()
+            inp=str(self.acomm())
             if inp.find('Z')>0:
                 p1=inp.find('Z')
                 ival=float(inp[p1+2:p1+5])
@@ -209,7 +209,7 @@ class ocean3d(oceanjaz,specscope3d):
             
         def end(self):
             if hasattr(self,"ard") and self.ard!=None: 
-                self.goto(rc.xy_cent[0],rc.xy_cent[1],self.gzmin+)
+                self.goto(rc.xy_cent[0],rc.xy_cent[1],(self.gzmin+self.gzmin)/2.)
                 self.ard.close()
                 del self.ard
             oceanjaz.end(self)

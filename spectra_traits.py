@@ -35,7 +35,7 @@ boost=1#50
 from pyface.qt import QtGui, QtCore
 from pyface.progress_dialog import ProgressDialog as ProgressBar
 
-matplotlib.use('QT4Agg')
+#matplotlib.use('QT4Agg')
 from matplotlib.figure import Figure
 from matplotlib import pyplot#.cm import get_cmap
 glob_cmap=pyplot.cm.get_cmap('RdYlBu')
@@ -772,7 +772,7 @@ class Spectrac(HasTraits):
         mid=(rep[0][0]+rep[0][1])/2.
         if mid<self.instr.gzmin: return
         if mid>self.instr.gzmax: return
-        self.goto(rc.refer_pos[:2]+[mid])
+        self.instr.goto(rc.refer_pos[:2]+[mid])
         self.instr.gz=rc.refer_pos[-1]
         self.awrite("G92 Z%.2f"%rc.refer_pos[-1]) #set new position
 
@@ -1170,7 +1170,10 @@ class ControlPanel(HasTraits):
     loadme=Button("Load set")
     sname = File(rc.test_map,label="Filename")
     saveme=Button("Save selected")
+    
     stack_disp=[]
+    unit='eV'
+    uchanged=False
 
     view = View(Group(
                     Group(
@@ -1441,6 +1444,7 @@ class ControlPanel(HasTraits):
             if ymin<rc.graph_min: ymin=rc.graph_min
             if rc.relative and (ymax>rc.graph_max): ymax=rc.graph_max
             self.figure.axes[0].set_ylim(ymin,ymax)
+            self.figure.axes[0].xlabel(self.unit)
             self.figure.canvas.draw()
 
     def add_line(self, string):
@@ -1466,6 +1470,7 @@ class ControlPanel(HasTraits):
                 ibnd=min(len(ipck),len(spect))
                 for i in range(ibnd):
                     dx,dy=pin.chanene[ipck[i]],spect[i]
+                    if self.unit=='nm':dx=1240/dx.copy()
                     if pin.ysel!=None:
                         dx,dy=dx[pin.ysel[i]],dy[pin.ysel[i]]
                     self.spect_last.append(self.figure.axes[0].plot(dx,dy,lw=rc.line_width,color=self.grcolors[i])[0])
@@ -1480,6 +1485,12 @@ class ControlPanel(HasTraits):
                 if rc.debug>1: print("updating %i graphs"%nbnd)
                 for i in range(len(spect)):
                     #if not iterable(pin.ysel[i]): continue  
+                    if self.unit=='nm' and self.uchanged:
+                        dx= self.spect_last[i].get_xdata()
+                        dx=1240/dx.copy()
+                        self.spect_last[i].set_xdata(dx)
+                        self.uchanged=False
+                
                     if len(self.spect_last)<=i: break
                     if self.spectrac.norm[i]>0: #instr.intfact
                         if pin.ysel!=None:
@@ -1572,7 +1583,8 @@ class MainWindow(HasTraits):
     panel = Instance(ControlPanel)
 
     adjust_image = Button("Adjust graph")
-
+    unit = Enum(["eV","nm"],label="Units")
+    
     def _figure_default(self):
         figure = Figure()
         figure.add_axes([0.1, 0.04, 0.87, 0.92])
@@ -1593,6 +1605,11 @@ class MainWindow(HasTraits):
     def _adjust_image_fired(suself):
         suself.panel.adjust_image()
 
+    def _units_changed(self):
+        self.panel.unit=self.unit
+        self.panel.update_unit(self.panel.unit)
+        self.panel.uchanged=True
+
     def _panel_default(self):
         return ControlPanel(figure=self.figure,design=self.design,results=self.results)
 
@@ -1601,7 +1618,7 @@ tabbedview = View(HSplit(Group(Group(
                                 Item('design', editor=MPLFigureEditor(), dock='tab'),
                                 Item('results', editor=MPLFigureEditor(), dock='tab'),
                                 layout="tabbed", show_labels=False,springy=True),
-                            Item('adjust_image', show_label=False ),
+                            HGroup(Item('adjust_image', show_label=False ),Item('unit')),
                             springy=True),
                        Item('panel', style="custom",resizable=True),
                        show_labels=False,
