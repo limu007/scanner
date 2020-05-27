@@ -12,6 +12,7 @@ from traitsui.ui_editors.array_view_editor import ArrayViewEditor
 
 from traitsui.menu import Menu, Action, Separator
 from traitsui.message import message
+#from traitsui.file_dialog  import open_file, TextInfo
 #from mpl_figure_editor import MPLFigureEditor
 import matplotlib
 #from scipy import indices,rand
@@ -73,6 +74,7 @@ class Experiment(HasTraits):
     combine = Bool(rc.chan_combine,label="combine multichannel")
     savecols = Bool(True,label="spectra in columns")
     sname = File(label="Filename")
+    counter = String("")
     refer = Button("Reference")
     darken = Button("Dark")
     saveme = Button("Save")
@@ -81,19 +83,21 @@ class Experiment(HasTraits):
     ready = Bool(False)
     paren = None
     errb = Bool(False,label="errorband",desc="whether display error band")
+    calib = Bool(False,label="calib. data",desc="include reference in output")
     recalper = Int(0,label="recalib. period",desc="regular calibration during scanning")
     material = String("SiO2/Si",label="layer. structure")
 
     menubar = MenuBar(Menu(Action(name='test Action', action='_run_action'), name="Menu"))
 
-    view = View(HGroup(Item('expo',width=5), Item('aver',resizable=True,width=5),),
+    view = View(VFold(HGroup(Item('expo',width=5), Item('aver',resizable=True,width=5),),
                 HGroup(Item('shut'),Item('median',width=5),Item('combine'), Item('smooth',enabled_when="combine==False")),
                 HGroup(Item('darken',show_label=False, enabled_when="ready"),Item('refer',show_label=False, enabled_when="ready"),
-                Item('recalper',enabled_when="ready"),),
+                Item('recalper',enabled_when="ready"),Item('counter',show_label=False),),
                 HGroup(Item('sname'),Item('saveme',show_label=False, enabled_when="sname!=''"), Item('record')),
                 HGroup(Item('saveall',show_label=False, enabled_when="sname!=''"),Item('savecols'), Item('refermat',label="Ref. material")),
-                Item('errb'),#editor=CheckListEditor(values=reflist)
-                menubar=menubar,width=10)
+                HGroup(Item('errb'),Item('calib')),#editor=CheckListEditor(values=reflist)
+                layout='split',)#menubar=menubar,width=10)
+                )
 
     def _shut_changed(self):
         #import urllib2
@@ -153,15 +157,24 @@ class Experiment(HasTraits):
             data=self.instr.result(maxit=-2)
             olist=[]
             for i in range(len(data)):
-                if hasattr(self,'intfact') and self.intfact[i]==0: continue
-                olist+=[self.instr.chanene[i],data[i]]
+                if hasattr(self.instr,'intfact') and len(self.instr.intfact)>i and self.instr.intfact[i]==0: continue
+                ix=self.instr.chanene[i]
+                if self.paren.unit=='nm':  ix=1240/ix
+                if self.calib:
+                    olist+=[ix,data[i],self.instr.flat[i]]
+                else:
+                    olist+=[ix,data[i]]
             odata=array(olist).T
         elif len(self.stack)>1:
             olist=self.stack.keys()
-            odata=array([self.instr.pixtable]+[self.stack[k] for k in olist])
+            ix=self.instr.pixtable
+            if self.paren.unit=='nm':  ix=1240/ix
+            odata=array([ix]+[self.stack[k] for k in olist])
             print("saved %i spectra"%len(olist))
         else:
-            odata=array([self.instr.pixtable,self.instr.last])
+            ix=self.instr.pixtable
+            if self.paren.unit=='nm':  ix=1240/ix
+            odata=array([ix,self.instr.last])
         if not self.savecols: odata=odata.T
         #todo check for existing filename
         #incremental naming
@@ -185,11 +198,14 @@ class Experiment(HasTraits):
                     ix,iy=float(scode[1]),float(scode[2])
                 except:
                     continue
+                if self.paren.unit=='nm':  ix=1240/ix
                 #poslst.append([ix,iy])
                 if cn>0 and (type(self.stack[k])==list or len(self.stack[k].shape)>1):
                     speclst.append(concatenate([[ix,iy],self.stack[k][cn-1]]))
                 else:
                     speclst.append(concatenate([[ix,iy],self.stack[k]]))
+            if self.calib:
+                speclst.append(concatenate([[0,0],self.instr.flat[i]]))
             oname=self.sname
             if cn>0:
                 if oname.find('.')>0: oname=oname.replace(".","_%i."%cn)
@@ -577,7 +593,7 @@ class AcquisitionThread(Thread):
         try:
             if self.processing_job.isAlive():
                 self.display("Processing too slow")
-                return
+                #return WHY end here?
         except AttributeError:
             pass
         self.analyse.calculate = True #call the Analyse event
@@ -594,7 +610,7 @@ class AcquisitionThread(Thread):
             # do nothing for the moment
         self.result()
 
-    def run(self):
+    def run(self,max_img=0):
         """ Runs the acquisition loop. """
         self.display('Spectrac started')
         self.n_img = 0
@@ -628,6 +644,7 @@ class AcquisitionThread(Thread):
                 self.stack[sname]=spect
             self.image_show(spect)
             self.process(spect)
+            if max_img>0 and self.n_img>max_img: break
         self.display('Spectrac stopped')
 
 #--------------------------------------------------------------------
@@ -728,10 +745,14 @@ class Spectrac(HasTraits):
         self.instr.setup([self.elow,self.ehigh],estep=self.resol,integ=self.exper.expo,aver=self.exper.aver)
         import os
         if hasattr(rc,'dark_path') and os.path.exists(rc.dark_path): #precalibration
-            from numpy import loadtxt
+            from numpy import loadtxt,r_
             self.instr.dark=loadtxt(rc.dark_path,unpack=True)
             print('preloaded dark '+str(self.instr.dark.mean(1)))
-        if len(self.instr.chanene)>0: self.exper.display(" found %i channels ..."%len(self.instr.chanene))
+        if len(self.instr.chanene)>0: 
+            self.exper.display(" found %i channels ..."%len(self.instr.chanene))
+            nums=r_[:len(self.instr.chanene[0])]
+            mens=len(self.instr.chanene[0])/2
+            self.instr.ysel=[mens-abs(nums-mens)>20 for i in range(len(self.instr.chanene))]
         #if len(self.instr.chanrange)>0: self.exper.display(" found %i channels ..."%len(self.instr.chanrange))
         self.exper.instr=self.instr
         if hasattr(self.instr,'ard'):
@@ -868,8 +889,10 @@ class Spectrac(HasTraits):
                 allspect=[]
                 for i in range(experiment.median):
                     allspect.append(self.instr.result(div_flat=rc.relative))
+                    experiment.counter="meas. %i"%(i+1)
                 spect=median(allspect,0)
-                self.paren.display("Median")
+                self.paren.display("Median calculated")
+                experiment.counter=""
             else:
                 spect=self.instr.result(div_flat=rc.relative)
             if not(hasattr(spect,"shape")): return None
@@ -881,7 +904,8 @@ class Spectrac(HasTraits):
                 allspect=[]
                 for i in range(experiment.median):
                     allspect.append(self.instr.result(div_flat=rc.relative))
-                    experiment.display("Collecting %i/%i"%(i+1,experiment.median))
+                    #experiment.display("Collecting %i/%i"%(i+1,experiment.median))
+                    experiment.counter="meas. %i/%i"%(i+1,experiment.median)
                 spect=median(allspect,0)
                 #self.paren.display("Median")
             else:
@@ -927,6 +951,8 @@ class Spectrac(HasTraits):
     def _refer_y_changed(self):
         rc.refer_pos=[int(self.refer_x),int(self.refer_y)]
 
+demo_id = 'traitsui.demo.standard_editors.file_dialog.text_info'
+
 class Analyse(HasTraits):
     erange = Range(0.,1.0)
     #erange = grange
@@ -942,7 +968,7 @@ class Analyse(HasTraits):
     res = Button('Reset')
     fitshow = Button('Show fit')
     variab = String('thick',label='What to show')
-    fname = File('',label="Script name")
+    fname = File('',label="Script name",style='readonly')
     load = Button('Load')
     save = Button('Save')
     dump = Button('Dump', desc="save displayed map to file")
@@ -1000,14 +1026,24 @@ class Analyse(HasTraits):
 
     def _load_fired(self):
         import os
-        if os.path.exists(self.fname):
-            self.code=open(self.fname).read()
-            self.status_string="Code loaded"
-        else:
-            self.status_string="File not found"
+        #iname = open_file(extensions=TextInfo(),filter='Python file (*.py)|*.py',id=demo_id)
+        if self.fname != '':
+            #self.fname = iname
+            if os.path.exists(self.fname):
+                self.code=open(self.fname).read()
+                self.status_string="Code loaded"
+            else:
+                self.status_string="File not found"
         
         
     def _save_fired(self):
+        if self.fname=='':
+            try:
+                iname = open_file(extensions=TextInfo(),
+                    filter='Python file (*.py)|*.py',id=demo_id)
+            except:
+                return
+            if iname=='': return   
         ofile=open(self.fname,"wb")
         ofile.write(self.code.encode("u8"))
         self.status_string="Code saved"
@@ -1037,13 +1073,14 @@ class Analyse(HasTraits):
             # no fit yet
             self.status_string="No fit saved yet!"
             return
-        rep=samp.plot(ax=ax)
+        rep=samp.plot(ax=ax,amodel=True)
         self.paren.spect_last=rep
         self.paren.figure.canvas.draw()
 
 
     def _run_fired(self):
         #rep=exec(self.code) not working
+        print('running code')
         imp=self.code
         imp=imp.replace("return ","results['out']=")
         self.func=compile(imp,'compiled','exec')
@@ -1151,6 +1188,7 @@ class ControlPanel(HasTraits):
     design = Instance(Figure)
     results = Instance(Figure)
     start_stop_acquisition = Button("Start/Stop")
+    single_acquisition = Button("Single",desc="measure and stop")
     results_string = String()
     stack_list = List(Str, [])
     stack_selec = List(Str, [])
@@ -1207,7 +1245,9 @@ class ControlPanel(HasTraits):
                     layout='tabbed'),
                    # Group(
                         Item('status_string', show_label=False, style='readonly'),
-                        Item('start_stop_acquisition', show_label=False, enabled_when="experiment.ready" ),
+                        HGroup(Item('start_stop_acquisition', show_label=False, enabled_when="experiment.ready" ),
+                            Item('single_acquisition', show_label=False, enabled_when="experiment.ready" ),
+                        ),
 
                    # ),
                 resizable=True)
@@ -1373,7 +1413,36 @@ class ControlPanel(HasTraits):
     def _saveme_fired(self):
         self.experiment._saveall_fired(selected=True)
 
-    def _start_stop_acquisition_fired(self):
+    def prepare_acquisition(self):
+        from numpy import iterable
+        if self.spect_last!=None: #cleaning
+            if iterable(self.spect_last):
+                cnt=len(self.spect_last)
+                for sp in self.spect_last: sp.remove()
+            else:
+                self.spect_last.remove()
+            self.spect_last=None
+        if self.spectrac.instr==None:
+            message("press Setup first", title = 'User request')
+            return False
+        self.scanner.instr=self.spectrac.instr
+        self.analyse.instr=self.spectrac.instr
+
+        self.acquisition_thread = AcquisitionThread()
+        if self.scanner.ready: #scanning in process
+            self.acquisition_thread.prepare = self.scanner.next_point
+        self.acquisition_thread.display = self.add_line
+        self.acquisition_thread.acquire = self.spectrac.measure
+        self.acquisition_thread.experiment = self.experiment
+        self.acquisition_thread.stack = self.experiment.stack
+        self.acquisition_thread.image_show = self.image_show
+        self.acquisition_thread.analyse = self.analyse
+        self.acquisition_thread.result = self.result_update
+        #self.bardial.update(10)
+        #self.start_stop_acquisition.label_value="Running"
+        return True
+
+    def _start_stop_acquisition_fired(self,keep_run=True):
         """ Callback of the "start stop acquisition" button. This starts
         the acquisition thread, or kills it.
         """
@@ -1386,34 +1455,16 @@ class ControlPanel(HasTraits):
             #self.start_stop_acquisition.label_value="Stopped"
         else: #starting....
             #self.figure.clean()
-            from numpy import iterable
-            if self.spect_last!=None: #cleaning
-                if iterable(self.spect_last):
-                    cnt=len(self.spect_last)
-                    for sp in self.spect_last: sp.remove()
-                else:
-                    self.spect_last.remove()
-                self.spect_last=None
-            if self.spectrac.instr==None:
-                message("press Setup first", title = 'User request')
+            if not self.prepare_acquisition():
                 return
-            self.scanner.instr=self.spectrac.instr
-            self.analyse.instr=self.spectrac.instr
-
-            self.acquisition_thread = AcquisitionThread()
-            if self.scanner.ready: #scanning in process
-                self.acquisition_thread.prepare = self.scanner.next_point
-            self.acquisition_thread.display = self.add_line
-            self.acquisition_thread.acquire = self.spectrac.measure
-            self.acquisition_thread.experiment = self.experiment
-            self.acquisition_thread.stack = self.experiment.stack
-            self.acquisition_thread.image_show = self.image_show
-            self.acquisition_thread.analyse = self.analyse
-            self.acquisition_thread.result = self.result_update
-            #self.bardial.update(10)
-            #self.start_stop_acquisition.label_value="Running"
             self.status_string="Running"
             self.acquisition_thread.start()
+
+    def _single_acquisition_fired(self):
+        if not self.prepare_acquisition():
+                return
+        #self._start_stop_acquisition_fired(False)
+        self.acquisition_thread.run(1)
 
     def adjust_image(self,margin=0.02,percent=99):
         from numpy import iterable,percentile
@@ -1442,9 +1493,10 @@ class ControlPanel(HasTraits):
                 ydis=ymax-ymin
                 ymin,ymax=ymin-ydis*margin,ymax+ydis*margin
             if ymin<rc.graph_min: ymin=rc.graph_min
+            if ymax<ymin: ymax,ymin=ymin,ymax # should never happen
             if rc.relative and (ymax>rc.graph_max): ymax=rc.graph_max
-            self.figure.axes[0].set_ylim(ymin,ymax)
-            self.figure.axes[0].xlabel(self.unit)
+            self.figure.axes[0].axes.set_ylim(ymin,ymax)
+            self.figure.axes[0].axes.set_xlabel(self.unit)
             self.figure.canvas.draw()
 
     def add_line(self, string):
@@ -1485,18 +1537,26 @@ class ControlPanel(HasTraits):
                 if rc.debug>1: print("updating %i graphs"%nbnd)
                 for i in range(len(spect)):
                     #if not iterable(pin.ysel[i]): continue  
-                    if self.unit=='nm' and self.uchanged:
+                    if self.uchanged:
                         dx= self.spect_last[i].get_xdata()
+                        #if self.unit=='nm':
                         dx=1240/dx.copy()
                         self.spect_last[i].set_xdata(dx)
-                        self.uchanged=False
-                
                     if len(self.spect_last)<=i: break
                     if self.spectrac.norm[i]>0: #instr.intfact
                         if pin.ysel!=None:
                             self.spect_last[i].set_ydata(spect[i][pin.ysel[i]])
                         else:
                             self.spect_last[i].set_ydata(spect[i])
+                if self.uchanged: 
+                    pp=self.figure.axes[0].axes.get_xlim()
+                    print('changed variable to %s'%self.unit)
+                    self.figure.axes[0].axes.set_xlim(1240/pp[1],1240/pp[0])
+                    print("new limits wanna be %.4f - %.4f"%(1240/pp[1],1240/pp[0]))
+                    #if self.unit=='nm': self.figure.axes[0].set_xlim(200,1000)
+                    #else: self.figure.axes[0].set_xlim(.5,7)
+                    self.uchanged=False
+                    #changing draw limits
         self.figure.canvas.draw()
         #self.profile.canvas.draw()
 
@@ -1547,10 +1607,10 @@ class ControlPanel(HasTraits):
         elif len(plan)>0:
             ax.plot([p[0] for p in plan],[p[1] for p in plan],'bd-')
             pp=ax.get_xlim()
-            mdis=(pp[1]-pp[0])*0.02
+            mdis=(pp[1]-pp[0])*0.02 #extra distance
             self.scanner.xdim=[pp[0]-mdis,pp[1]+mdis]
             pp=ax.get_ylim()
-            if pp[0]<pp[1]: pp=pp[::-1]
+            if pp[0]>pp[1]: pp=pp[::-1]
             self.scanner.ydim=[pp[0]-mdis,pp[1]+mdis]
         if hasattr(self.scanner,'xdim'): ax.set_xlim(*self.scanner.xdim)
         if hasattr(self.scanner,'ydim'): ax.set_ylim(*self.scanner.ydim)
@@ -1605,9 +1665,9 @@ class MainWindow(HasTraits):
     def _adjust_image_fired(suself):
         suself.panel.adjust_image()
 
-    def _units_changed(self):
+    def _unit_changed(self):
         self.panel.unit=self.unit
-        self.panel.update_unit(self.panel.unit)
+        #self.panel.update_unit(self.panel.unit)
         self.panel.uchanged=True
 
     def _panel_default(self):

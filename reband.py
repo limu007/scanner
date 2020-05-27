@@ -453,6 +453,21 @@ class Sample():
         self.nearest=nnear=dict([(dist[j]+ddist*j,smsel[j]) for j in zlist[1:maxnbrh+1]])
         return np.mean(dist[1:maxnbrh+1])
 
+    def get_predict(self,pord=2,trange=[]):
+        '''interpolate already calculated valued to get local prediction
+        '''
+        predtab=np.array([np.r_[s.pos-self.pos,s.get_thick().n] for s in self.nearest.values()]).T
+        if len(trange)>1:
+            sel=(predtab[2]>=trange[0])*(predtab[2]<=trange[1])
+            predtab=predtab[:,sel]
+        px,py,predval=predtab
+        if len(px)<4: return #cannot fit anythin`
+        if (pord==2) and len(px)>6: modA=np.array([np.ones_like(px),px,py,px**2,py**2,px*py]) #quadratic
+        else:modA=np.array([np.ones_like(px),px,py])
+        matH=modA@modA.T
+        predic=np.linalg.inv(matH)@modA@predval
+        chi2=((predval-modA.T@predic)**2).sum()
+        return predic[0],chi2
 
     def get_thick(self,select=None,unc=True):
         if len(self.thick)==0: return None
@@ -491,6 +506,58 @@ class Sample():
             if save: bd.qfit=res[-1]
         return res
 
+    def get_der2(self,dis=0.01,resf=None,arrf=None,rep=0,lab=None):
+        if resf==None: resf=self.fit(prefun=True)
+        if not np.iterable(arrf):
+            arrf=self.fit(prefun=False)
+            if lab in self.thick: arrf[0]=self.thick[lab]
+            else: arrf[0]=self.get_thick(None,False)
+            arrf=arrf.astype(float)
+        avec=np.eye(len(arrf))
+        
+        chimin=resf(arrf)
+        upvec=[resf(arrf*(1+dis*av)) for av in avec]
+        dnvec=[resf(arrf*(1-dis*av)) for av in avec]
+        dder=(np.array(upvec)+dnvec-2*chimin)/dis**2/arrf.astype(float)**2
+        if rep==2: return np.sqrt(1/dder),resf,arrf
+        if rep==1: return np.sqrt(1/dder),arrf
+        return np.sqrt(1/dder) #sigma v rezu
+    
+
+    def model_cov(self,msiz=40,dis=0.01,minder=0,lab=None):
+        qder,resf,arrf=get_der2(self,rep=2,lab=lab)
+        #qder=(np.array(upvec)+dnvec-2*chim)/dis**2
+        sel=qder>minder
+        amat=np.array([sel*np.random.normal(size=len(sel)) for i in range(msiz)])
+        #mozna upravit velikost kroku v tom kterem smeru
+        #Hmat=amat.T@amat
+        #covX=np.linalg.inv(Hmat[sel][:,sel])
+        arrf=arrf.astype(float)
+        amat=amat*qder*dis
+        #print(abs(amat).max(0))
+        zlst=np.r_[:len(sel)][sel]
+        out=[]
+        for j in zlst:
+            out.extend([(i,j) for i in zlst[zlst>j]])
+        extmat=[amat[:,ia]*amat[:,ib] for ia,ib in out]
+        fullmat=np.r_[[np.ones(len(amat))],amat[:,sel].T,amat[:,sel].T**2,extmat] 
+
+        achis=[resf(arrf+amat[i]) for i in range(len(amat))]
+        #pl.plot(np.sqrt((amat**2).sum(1)),achis-chim,'d')
+        fhesX=fullmat@fullmat.T
+        fcovX=np.linalg.inv(fhesX)
+        pars=fcovX@fullmat@achis
+        sig=np.sqrt(pars[0]/(sum(sum([b.sel for b in self.bands]))-len(sel)))
+        
+        hesF=np.eye(len(sel))*1e-4
+        for i in zlst:
+            hesF[i,i]=pars[1+sum(sel)+i]
+        for k in range(len(out)):
+            i,j=out[k]
+            hesF[i,j]=pars[1+sum(sel)*2+k]/2.
+            hesF[j,i]=pars[1+sum(sel)*2+k]/2.
+        return np.linalg.inv(hesF)*sig**2
+    
     def renorm(self,thick=None):
         for bd in self.bands:
             bd.renorm(thick=thick)
