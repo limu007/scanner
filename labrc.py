@@ -136,8 +136,9 @@ web_restart_gap=8
 chan_combine=False
 chan_corr=[ 1.40927795,  1.35854274,  1.53249378]
 chan_equal=(1,1,1)
-ref_epsfile="tio2_tl-eps.mat"
+ref_epsfile={'TiO2':"tio2_tl-eps.mat",'SiN':'sinx_cl2.mat'}
 ref_epsweb="http://physics.muni.cz/~munz/manip/CVD/"
+ref_epsweb="https://owncloud.cesnet.cz/index.php/s/EM7PYQPP5jCyPqP/download?path=%2F&files="
 ref_epscorr=[-0.06273044,  1.09829889]
 #--------------------------------------------------
 scan_extra_buttons=True

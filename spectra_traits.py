@@ -94,7 +94,7 @@ class Experiment(HasTraits):
                 HGroup(Item('darken',show_label=False, enabled_when="ready"),Item('refer',show_label=False, enabled_when="ready"),
                 Item('recalper',enabled_when="ready"),Item('counter',show_label=False),),
                 HGroup(Item('sname'),Item('saveme',show_label=False, enabled_when="sname!=''"), Item('record')),
-                HGroup(Item('saveall',show_label=False, enabled_when="sname!=''"),Item('savecols'), Item('refermat',label="Ref. material")),
+                HGroup(Item('saveall',show_label=False, enabled_when="sname!=''"),Item('savecols'), Item('refermat',label="Ref. material"), Item('material')),
                 HGroup(Item('errb'),Item('calib')),#editor=CheckListEditor(values=reflist)
                 layout='split',)#menubar=menubar,width=10)
                 )
@@ -768,6 +768,9 @@ class Spectrac(HasTraits):
         self.norm=rc.chan_equal
         self.paren.status_string="now calibrate [Experiment/Dark + Reference]"
         self.chanlist=[('%.2f-%.2f eV'%(c.min(),c.max())) for c in self.instr.chanene]
+        self.paren.scanner.instr=self.instr
+        self.paren.analyse.instr=self.instr
+
         self.ready=True
         #for c in self.chanlist:
         #    self.singlechan.append(c)
@@ -993,7 +996,15 @@ class Analyse(HasTraits):
         '''
         samp=None
         if not iterable(ydat): ydat=self.instr.last
-        if hasattr(self,'instr'):
+        if hasattr(self.paren,'wafer') and not iterable(ydat):
+            if self.smnum>=len(self.paren.wafer.samps): self.smnum=0
+            samp=self.paren.wafer.samps[self.smnum]
+            if self.chuse>len(samp.bands): self.chuse=1
+            if self.chuse>0: xdat=samp.bands[self.chuse-1].ix
+            if iterable(ydat): 
+                if len(ydat.shape)==2: ydat=ydat[self.chuse-1]
+            else: ydat=samp.bands[self.chuse-1].iy
+        elif hasattr(self,'instr'):
             if len(self.instr.chanene)>0:
                 if self.chuse>0:
                     if self.chuse>len(self.instr.chanene): self.chuse=1
@@ -1001,21 +1012,13 @@ class Analyse(HasTraits):
                     ydat=ydat[self.chuse-1]
             else:
                 xdat=self.instr.pixtable
-        else: #processing loaded data
-            if hasattr(self.paren,'wafer') and not iterable(ydat):
-                if self.smnum>=len(self.paren.wafer.samps): self.smnum=0
-                samp=self.paren.wafer.samps[self.smnum]
-                if self.chuse>len(samp.bands): self.chuse=1
-                if self.chuse>0: xdat=samp.bands[self.chuse-1].ix
-                if iterable(ydat): 
-                    if len(ydat.shape)==2: ydat=ydat[self.chuse-1]
-                else: ydat=samp.bands[self.chuse-1].iy
-
+        
         sel=(xdat>=self.elow)*(xdat<=self.ehigh)
         if not iterable(ydat) or len(ydat)!=len(sel): 
             if prep_only: return {}
             else: return 0
         odict={'xdat':xdat[sel],'ydat':ydat[sel],'samp':samp,'results':{}}
+        odict['rc']=rc
         if samp==None and hasattr(self.instr,"samp"): odict['samp']=self.instr.samp
         if prep_only: return odict
         exec(self.func,odict)
@@ -1097,7 +1100,7 @@ class Analyse(HasTraits):
         import numpy as np
         if len(self.variab)>0 and hasattr(self.paren,'wafer'): #already calculated values
             varfunc=compile("result="+self.variab,'compiled','exec')
-            print("calculating '%s' for %i points"%(self.variab,len(self.paren.wafer.samps)))
+            print("extracting '%s' for %i points"%(self.variab,len(self.paren.wafer.samps)))
             for samp in self.paren.wafer.samps:
                 if self.variab=='thick':
                     if len(samp.thick)<1: continue
@@ -1115,14 +1118,20 @@ class Analyse(HasTraits):
             imp=self.code
             imp=imp.replace("return ","results['out']=")
             self.func=compile(imp,'compiled','exec')
-            odict={'results':{}}
+            odict={'results':{},'out':[],'rc':rc}
             if hasattr(self.paren,'wafer'): #using wafer 
+                print("calculating '%s' for %i points"%(self.variab,len(self.paren.wafer.samps)))
                 for samp in self.paren.wafer.samps:
                     odict['samp']=samp
+                    bnum=0 if self.chuse>len(samp.bands) else self.chuse-1
+                    odict['xdat'],odict['ydat']=samp.bands[bnum].ix,samp.bands[bnum].iy
                     exec(self.func,odict)
+                    if iterable(odict['out']): oval=odict['out'][0]
+                    else: oval=odict['out']
                     self.vpos.append(samp.pos)
-                    self.vals.append(odict['out'])
+                    self.vals.append(oval)
             elif len(self.paren.experiment.stack)>0: #using stack
+                print("calculation '%s' for %i stack entries"%(self.variab,len(self.paren.experiment.stack.keys())))
                 for n in self.paren.experiment.stack.keys():
                     spec=self.paren.experiment.stack[n]
                     try:
@@ -1133,8 +1142,9 @@ class Analyse(HasTraits):
                     odict['ydat']=spec
                     exec(self.func,odict)
                     self.vals.append(odict['out'])
-        
+        if len(self.vals)==0: return
         print("showing values from %.1f to %.1f"%(np.min(self.vals),np.max(self.vals)))
+        print("positions %i/%i - %i/%i"%tuple(list(np.min(self.vpos,0))+list(np.max(self.vpos,0))))
         self.paren.design_show(self.vpos,self.vals)
     
     def _dump_fired(self):
@@ -1293,6 +1303,7 @@ class ControlPanel(HasTraits):
                     if self.experiment.instr.intfact[j]==0: continue
                     p=self.figure.axes[0].plot(ix,self.experiment.stack[a][j],mcol)[0]
                     self.stack_disp.append(p)
+            self.scanner.instr.last=self.experiment.stack[a] #do we want this?
             coors=a.split("_")
             if len(coors)==3:
                 try:
@@ -1425,8 +1436,6 @@ class ControlPanel(HasTraits):
         if self.spectrac.instr==None:
             message("press Setup first", title = 'User request')
             return False
-        self.scanner.instr=self.spectrac.instr
-        self.analyse.instr=self.spectrac.instr
 
         self.acquisition_thread = AcquisitionThread()
         if self.scanner.ready: #scanning in process

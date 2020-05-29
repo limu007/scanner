@@ -139,7 +139,7 @@ class Band():
     def guess(self,dlist=None,rep=1):
         #dlist in nanometers
         #from scanner import profit
-        epsi=[diel['ksio2'](self.ix),diel['ksi'](self.ix)]
+        #epsi=[diel['ksio2'](self.ix),diel['ksi'](self.ix)]
         if not(np.iterable(dlist)): dlist=np.arange(20,300,5)
         nor=lambda d:((self.absol())[self.sel]/self.model([d],renow=True)[self.sel]).std()
         slist=[nor(d) for d in dlist]
@@ -408,7 +408,7 @@ class Sample():
         #self.norm=lambda x:1
         if laystruct!=None: self.lay=laystruct
 
-    def calib(self):
+    def calib(self,rc=None):
         from scanner import spectra
         import pickle,os
         #epssi=spectra.dbload("cSi_asp")
@@ -420,6 +420,14 @@ class Sample():
             else:
                 epssi=pickle.load(open(indir+"si_eps_fulld.mat","rb"))
             diel['ksi']=ip.interp1d(epssi[0],epssi[1])
+        if not 'ksin' in diel:
+            if hasattr(rc,'ref_epsweb'):
+                try:
+                    tsin=np.loadtxt(rc.ref_epsweb+rc.ref_epsfile['SiN'],skiprows=3,unpack=True)
+                except:
+                    print('cannot fetch from ',rc.ref_epsweb)
+                else:
+                    diel['ksin']=ip.interp1d(tsin[0],(tsin[1]+1j*tsin[2])**2)
         if not 'ksio2' in diel:
             if not os.path.exists(indir+"sio2_palik_g.mat"):
                 x=np.r_[0.5:6.5:0.01]#epssi[0]
