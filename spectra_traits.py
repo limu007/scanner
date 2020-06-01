@@ -587,6 +587,7 @@ class AcquisitionThread(Thread):
     """
     wants_abort = False
     n_img = 0
+    max_img = 0
 
     def process(self, spect):
         """ Spawns the processing(analysis) job. """
@@ -610,7 +611,7 @@ class AcquisitionThread(Thread):
             # do nothing for the moment
         self.result()
 
-    def run(self,max_img=0):
+    def run(self):
         """ Runs the acquisition loop. """
         self.display('Spectrac started')
         self.n_img = 0
@@ -644,7 +645,8 @@ class AcquisitionThread(Thread):
                 self.stack[sname]=spect
             self.image_show(spect)
             self.process(spect)
-            if max_img>0 and self.n_img>max_img: break
+            if self.max_img>0 and self.n_img>=self.max_img: self.wants_abort=True
+        self.max_img=0
         self.display('Spectrac stopped')
 
 #--------------------------------------------------------------------
@@ -927,11 +929,32 @@ class Spectrac(HasTraits):
                 if selpix[-1]<len(spect)-1: spect[selpix[-1]+1:]=spect[selpix[-1]]
             else:
                 print("problem combining:no pict selected")
+
+        #adding sample to the wafer structure
+        #should also check the stack
         self.instr.samp=self.instr.makesamp(spect)
         self.instr.samp.laystruct=experiment.material
         self.instr.samp.pos=list(self.paren.scanner.actpos.copy())
-        if hasattr(self.paren,'wafer'): 
-            self.paren.wafer.samps.append(self.instr.samp)
+        if hasattr(self.paren,'wafer'):
+            if len(self.paren.wafer.samps)>0 and len(self.instr.samp.pos)>=2:
+                pos=self.instr.samp.pos
+                nrst=self.paren.wafer.get_nearest(pos[0],pos[1],5,rep=2)
+                if len(nrst)>0 and (nrst[0][1]<rc.pos_map_toler):
+                    old_sm=nrst[0][0]
+                    old_name=old_sm.get_name()
+                    for i in range(len(self.paren.wafer.samps)):
+                        if self.paren.wafer.samps[i].get_name()==old_name:
+                            self.paren.wafer.samps[i]=self.instr.samp
+                            break
+                    else:
+                        print("could not find sample ",oldname)
+                        self.paren.wafer.samps.append(self.instr.samp)
+                    if old_name in self.paren.wafer.names:
+                        del self.paren.wafer.names[old_name]
+                else:
+                    self.paren.wafer.samps.append(self.instr.samp)
+            else:
+                self.paren.wafer.samps.append(self.instr.samp)
             self.instr.samp.wafer=self.paren.wafer
             self.instr.samp.update_nearest()
         return spect
@@ -971,7 +994,7 @@ class Analyse(HasTraits):
     res = Button('Reset')
     fitshow = Button('Show fit')
     variab = String('thick',label='What to show')
-    fname = File('',label="Script name",style='readonly')
+    fname = File(rc.base_script,label="Script name",style='readonly')
     load = Button('Load')
     save = Button('Save')
     dump = Button('Dump', desc="save displayed map to file")
@@ -1455,7 +1478,7 @@ class ControlPanel(HasTraits):
         """ Callback of the "start stop acquisition" button. This starts
         the acquisition thread, or kills it.
         """
-        if self.acquisition_thread and self.acquisition_thread.isAlive():
+        if self.acquisition_thread and self.acquisition_thread.isAlive() and self.acquisition_thread.max_img==0:
             self.acquisition_thread.wants_abort = True
             for k in self.experiment.stack.keys():
                 if not k in self.stack_list:
@@ -1473,7 +1496,9 @@ class ControlPanel(HasTraits):
         if not self.prepare_acquisition():
                 return
         #self._start_stop_acquisition_fired(False)
-        self.acquisition_thread.run(1)
+        self.acquisition_thread.max_img = 1
+        #self.acquisition_thread.run(1)
+        self.acquisition_thread.start()
 
     def adjust_image(self,margin=0.02,percent=99):
         from numpy import iterable,percentile

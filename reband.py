@@ -464,7 +464,13 @@ class Sample():
     def get_predict(self,pord=2,trange=[]):
         '''interpolate already calculated valued to get local prediction
         '''
-        predtab=np.array([np.r_[s.pos-self.pos,s.get_thick().n] for s in self.nearest.values()]).T
+        pos=np.array(self.pos)
+        tab=[]
+        for s in self.nearest.values():
+            thk=s.get_thick()
+            if thk==None: continue
+            tab.append(np.r_[pos-s.pos,thk.n])
+        predtab=np.array(tab).T
         if len(trange)>1:
             sel=(predtab[2]>=trange[0])*(predtab[2]<=trange[1])
             predtab=predtab[:,sel]
@@ -803,11 +809,14 @@ class Wafer():
     def get_pos(self):
         return np.array([list(sm.pos) for sm in self.samps]).T
 
-    def get_nearest(self,x,y,cnt=1):
+    def get_nearest(self,x,y,cnt=1,rep=1):
         cent=np.array([x,y]).reshape(2,1)
         dist2=((self.get_pos()-cent)**2).sum(0)
+        if len(dist2)==0: return []
         smbest=self.samps[np.argmin(dist2)]
-        if cnt==1: return [smbest]
+        if cnt==1: 
+            if rep==2: return [[smbest,np.sqrt(dist2.min())]]
+            return [smbest]
         smsom=[smbest]+[s for s in smbest.nearest.values()]
         smset=set(smsom)
         for s in smsom[1:]:
@@ -817,6 +826,7 @@ class Wafer():
         dist2=((np.array([list(sm.pos) for sm in smsom]).T-cent)**2).sum(0)
         print(len(dist2),np.sqrt(max(dist2)))
         smids=np.argsort(dist2)[:cnt]
+        if rep==2: return [(smsom[i],np.sqrt(dist2[i])) for i in smids]
         return [smsom[i] for i in smids]
 
     def get_edge(self,pos=None,rep=1):

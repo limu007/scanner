@@ -139,10 +139,12 @@ chan_equal=(1,1,1)
 ref_epsfile={'TiO2':"tio2_tl-eps.mat",'SiN':'sinx_cl2.mat'}
 ref_epsweb="http://physics.muni.cz/~munz/manip/CVD/"
 ref_epsweb="https://owncloud.cesnet.cz/index.php/s/EM7PYQPP5jCyPqP/download?path=%2F&files="
+base_script="C:/Users/optik/Documents/Data/Munz/cens_map2.py"
 ref_epscorr=[-0.06273044,  1.09829889]
 #--------------------------------------------------
 scan_extra_buttons=True
 scan_extra_menu_experim=True
+pos_map_toler = 1.0
 
 # analysis + multitasking
 use_queue=True
