@@ -562,9 +562,11 @@ class oceanjaz(ocean):
             iprev=i
         self.chanval=zeros((len(self.chanene),max([len(c) for c in self.chanene])))
         self.intfact=list(ones((len(self.chanene))))
+        #self.ysel=[]
         for i in range(len(self.chord)):
             if sum(self.chanene[i]>prange[0])<minpix: self.intfact[i]=0
             if sum(self.chanene[i]<prange[1])<minpix: self.intfact[i]=0
+            #self.ysel.append((self.chanene[i]>prange[0])*(self.chanene[i]<prange[1]))
         #self.pixtable=unitconv(1,unit,array(list(gchan)))
     
     def set_acquisition(self,expo,aver):
@@ -595,7 +597,7 @@ class oceanjaz(ocean):
         data=self.measure().astype(float)
         if sub_dark and iterable(self.dark): data-=self.dark
         if div_flat and iterable(self.flat):
-                data/=self.flat
+                data[self.flat>rc.lowlight]/=self.flat[self.flat>rc.lowlight]
                 if rc.hard_spec_min: data[data<rc.hard_spec_min]=rc.hard_spec_min
                 if rc.hard_spec_max: data[data>rc.hard_spec_max]=rc.hard_spec_max
         for i in range(len(data)):

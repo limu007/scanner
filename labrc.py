@@ -17,6 +17,7 @@ meas_range=1.2,6.2 # in electronVolts
 hard_spec_min=-0.1
 hard_spec_max=20
 saturate=65535
+lowlight=0
 
 lang='cs' #language of the interface
 #inst_dir='/home/optik/code/python/scanner/'#installation directory

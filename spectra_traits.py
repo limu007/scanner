@@ -251,7 +251,7 @@ class Experiment(HasTraits):
             print("reference failed")
             return
         fperc=percentile(rep,90,1)
-        if any(fperc<10):
+        if self.paren.spectrac.lowlight>0 and any(fperc<self.paren.spectrac.lowlight):
             message("No light for calibration!", title = 'Warning')
             return
         self.instr.flat=rep
@@ -671,6 +671,7 @@ class Spectrac(HasTraits):
     port = Int(rc.web_port, label="connect. port no.")
     #Item('elow'), Item('ehigh'),
     setmeup = Button("Initialize")
+    setmore = Button("Extension")
     setmeall = Button("Init and calibrate")
     equalize = Button("Equalize channels")
     calib = Button("Calibrate SiO2")
@@ -684,6 +685,9 @@ class Spectrac(HasTraits):
     norm = Tuple(Float,Float,Float)#List(Float, [1.,1,1])
     darkcorr = Bool(True, label="Dynamic dark")
     nonlincorr = Bool(True, label="Nonlin. correction")
+    lowlight = Int(rc.lowlight,label="min. signal in reference")
+    
+    bordsize = Int(20,label="edge cut")
     ready=Bool(False)
     chanmatch = Button("Match")
     chansel = -1
@@ -697,7 +701,7 @@ class Spectrac(HasTraits):
                 Item('erange', editor=BoundsEditor(low_name = 'elow', high_name = 'ehigh')),
                 Item('simulate'),
                 HSplit(Item('resol',width=5),Item('cooltemp',width=5, enabled_when='cooler==True'),),
-                HSplit(Item('darkcorr',width=5),Item('nonlincorr',width=5),),
+                HSplit(Item('darkcorr',width=5),Item('nonlincorr',width=5),Item('bordsize'),Item('lowlight',width=5),),
                 HSplit(Item('norm',style='simple',label="channel equalizer", enabled_when='instr!=None'),
                     #Item('singlechan',show_label=False, editor=ListEditor(style='readonly'),style='simple', enabled_when='instr!=None'),
                     Item('singlechan',show_label=False,editor=EnumEditor(name='handler.channels')),
@@ -706,7 +710,7 @@ class Spectrac(HasTraits):
                 Item('calib',width=5,show_label=False, enabled_when='instr.samp!=None'),Item('focus',show_label=False),
                 HSplit(Item('refer_x'),Item('refer_y'),),
                 HSplit(Item('debug'),Item('relative'),),
-                HSplit(Item('setmeup',show_label=False),Item('setmeall',show_label=False)),#Item('port'),
+                HSplit(Item('setmeup',show_label=False),Item('setmeall',show_label=False),Item('setmore',show_label=False)),#Item('port'),
                 springy=True),
                 resizable=True,
                 handler=ChanHandler
@@ -731,6 +735,7 @@ class Spectrac(HasTraits):
     def setup(self):
         #for i in range(3):
         #    self.norm[i]=1.
+        from numpy import iterable,array
         if self.instr==None:
             if self.simulate: self.instr=labin.specscope()
             elif hasattr(rc,"xy_cent"):
@@ -746,15 +751,23 @@ class Spectrac(HasTraits):
                 self.instr=labin.oceanjaz()
         self.instr.setup([self.elow,self.ehigh],estep=self.resol,integ=self.exper.expo,aver=self.exper.aver)
         import os
+        #self.norm=rc.chan_equal
         if hasattr(rc,'dark_path') and os.path.exists(rc.dark_path): #precalibration
             from numpy import loadtxt,r_
             self.instr.dark=loadtxt(rc.dark_path,unpack=True)
             print('preloaded dark '+str(self.instr.dark.mean(1)))
         if len(self.instr.chanene)>0: 
             self.exper.display(" found %i channels ..."%len(self.instr.chanene))
+            #if iterable(self.instr.ysel):
+            #    self.exper.display("size:"+"/".join(["%i"%sum(a) for a in self.instr.ysel]))
             nums=r_[:len(self.instr.chanene[0])]
             mens=len(self.instr.chanene[0])/2
-            self.instr.ysel=[mens-abs(nums-mens)>20 for i in range(len(self.instr.chanene))]
+            self.instr.ysel=[mens-abs(nums-mens)>self.bordsize for i in range(len(self.instr.chanene))]
+            for i in range(len(self.instr.chanene)):
+                self.instr.ysel[i][self.instr.chanene[i]<self.elow]=False
+                self.instr.ysel[i][self.instr.chanene[i]>self.ehigh]=False
+            self.exper.display("border:"+"/".join(["%i"%sum(a) for a in self.instr.ysel]))
+        self.norm=tuple(list(array(self.instr.intfact)*rc.chan_equal))
         #if len(self.instr.chanrange)>0: self.exper.display(" found %i channels ..."%len(self.instr.chanrange))
         self.exper.instr=self.instr
         if hasattr(self.instr,'ard'):
@@ -767,7 +780,6 @@ class Spectrac(HasTraits):
         #self.instr.config.Material=b'simu'
         self.instr.samp=None
         self.exper.display("setup ok [%i pixels] ..."%len(self.pixels))
-        self.norm=rc.chan_equal
         self.paren.status_string="now calibrate [Experiment/Dark + Reference]"
         self.chanlist=[('%.2f-%.2f eV'%(c.min(),c.max())) for c in self.instr.chanene]
         self.paren.scanner.instr=self.instr
@@ -1571,7 +1583,7 @@ class ControlPanel(HasTraits):
                 if rc.debug>1: print("updating %i graphs"%nbnd)
                 for i in range(len(spect)):
                     #if not iterable(pin.ysel[i]): continue  
-                    if self.uchanged:
+                    if self.uchanged: #unit change
                         dx= self.spect_last[i].get_xdata()
                         #if self.unit=='nm':
                         dx=1240/dx.copy()
